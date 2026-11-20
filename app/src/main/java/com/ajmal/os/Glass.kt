@@ -209,6 +209,9 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     private var edgeShader: LinearGradient? = null
     private var specShader: LinearGradient? = null
     private var sheenShader: LinearGradient? = null
+    private var frost: LinearGradient? = null
+    private var frostH = -1f
+    private var frostDark = false
 
     init {
         setWillNotDraw(false)
@@ -244,7 +247,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
 
         // Soft layered shadow (drawn outside the bounds; parents must not clip children).
         val sh = p.int(K.SHADOW) / 100f * shadowScale
-        if (!fullscreen && bm != null && sh > 0.02f) {
+        if (!fullscreen && sh > 0.02f) {
             paint.style = Paint.Style.FILL
             paint.shader = null
             for (i in 1..4) {
@@ -277,7 +280,8 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
                 shader!!.setLocalMatrix(mtx)
                 paint.shader = shader
             }
-            paint.color = Color.WHITE
+            // A touch of see-through so a slightly misaligned backdrop never reads as a solid slab.
+            paint.color = Color.argb(if (fullscreen) 255 else 215, 255, 255, 255)
             c.drawRoundRect(rect, rad, rad, paint)
             paint.shader = null
         }
@@ -285,8 +289,21 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
         // Surface tint. "Transparency" slider: higher = clearer glass.
         val a = (0.06f + 0.56f * (100 - p.int(K.OPACITY)) / 100f) * strength + (if (bm == null) 0.22f else 0f)
         val base = app.glassBase(dark)
-        paint.color = (base and 0xFFFFFF) or (al(a.coerceAtMost(0.92f)) shl 24)
-        c.drawRoundRect(rect, rad, rad, paint)
+        if (bm == null && !fullscreen) {
+            // No wallpaper access: procedural frosted glass instead of a flat tinted slab.
+            if (frost == null || frostH != h || frostDark != dark) {
+                val top = if (dark) Color.argb(78, 255, 255, 255) else Color.argb(150, 255, 255, 255)
+                val bot = if (dark) Color.argb(36, 255, 255, 255) else Color.argb(78, 255, 255, 255)
+                frost = LinearGradient(0f, 0f, 0f, h, top, bot, Shader.TileMode.CLAMP)
+                frostH = h; frostDark = dark
+            }
+            paint.shader = frost
+            c.drawRoundRect(rect, rad, rad, paint)
+            paint.shader = null
+        } else {
+            paint.color = (base and 0xFFFFFF) or (al(a.coerceAtMost(0.92f)) shl 24)
+            c.drawRoundRect(rect, rad, rad, paint)
+        }
 
         if (fullscreen) return
 
@@ -313,7 +330,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
                 Shader.TileMode.CLAMP
             )
         }
-        if (prof >= 1) {
+        run {
             paint.shader = specShader
             c.drawRoundRect(rect, rad, rad, paint)
             if (prof == 2) {
@@ -324,7 +341,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
             paint.shader = null
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f * dp
-            for (k in 0..2) {
+            for (k in 0 until (if (prof >= 1) 3 else 1)) {
                 val ins = (1.8f + k * 1.6f) * dp
                 tmp.set(ins, ins, w - ins, h - ins)
                 paint.color = Color.argb(al((0.10f - k * 0.03f) * edge), 255, 255, 255)

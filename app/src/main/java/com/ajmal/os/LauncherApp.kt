@@ -15,6 +15,7 @@ class LauncherApp : Application() {
         super.onCreate()
         inst = this
         prefs = Prefs(this)
+        IosIcons.on = prefs.bool(K.IOS_ICONS)
         icons = IconCache(this)
         glass = GlassRenderer(this)
         model = LauncherModel(this)

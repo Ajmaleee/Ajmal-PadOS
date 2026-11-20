@@ -21,14 +21,23 @@ import kotlin.math.max
 import kotlin.math.min
 
 class AppInfo(
-    val pkg: String, val cls: String, val label: String,
+    val pkg: String, val cls: String, val rawLabel: String,
     val installTime: Long, val system: Boolean, val category: Int
 ) {
     val key: String = "$pkg/$cls"
-    val lower: String = label.lowercase()
+    private val iosName: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { IosIcons.match(pkg, rawLabel)?.name }
+    private val rawLower: String = rawLabel.lowercase()
+    private val iosLower: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { iosName?.lowercase() }
+
+    /** iOS name (Phone, Messages, Safari, ...) for recognised system apps while the iOS icon pack is on. */
+    val label: String get() { val n = iosName; return if (n != null && IosIcons.on) n else rawLabel }
+    val lower: String get() { val n = iosLower; return if (n != null && IosIcons.on) n else rawLower }
+
+    /** Search match on the shown name or the original one (so "chrome" still finds Safari). */
+    fun matches(q: String): Boolean = lower.contains(q) || rawLower.contains(q)
 }
 
-/** True while the display is wider than tall. Home items keep one layout per orientation. */
+/** True while the display is wider than tall (used for responsive UI only; the home layout is shared). */
 object Orient {
     @Volatile var land = false
 }
@@ -36,26 +45,11 @@ object Orient {
 class Item(var id: Long, var type: Int) {
     var container = HOME
     var parent = 0L
-    /** Shared by both orientations. */
     var page = 0
-    // Portrait cell / span. Also used for dock slots and folder indices, which are orientation-independent.
-    var px = -1; var py = -1; var psx = 1; var psy = 1
-    // Landscape cell / span (home container only).
-    var lx = -1; var ly = -1; var lsx = 1; var lsy = 1
-
-    private val useL: Boolean get() = Orient.land && container == HOME
-    var x: Int
-        get() = if (useL) lx else px
-        set(v) { if (useL) lx = v else px = v }
-    var y: Int
-        get() = if (useL) ly else py
-        set(v) { if (useL) ly = v else py = v }
-    var sx: Int
-        get() = if (useL) lsx else psx
-        set(v) { if (useL) lsx = v else psx = v }
-    var sy: Int
-        get() = if (useL) lsy else psy
-        set(v) { if (useL) lsy = v else psy = v }
+    var x = 0
+    var y = 0
+    var sx = 1
+    var sy = 1
     var title = ""
     var pkg = ""
     var cls = ""
@@ -173,6 +167,11 @@ class LauncherModel(private val app: LauncherApp) {
         return out
     }
 
+    /** Re-sort after the iOS-names switch changed what labels say. */
+    fun resort() {
+        apps = apps.sortedBy { it.lower }
+    }
+
     private fun updateApps(list: List<AppInfo>) {
         apps = list
         val m = HashMap<String, AppInfo>()
@@ -207,8 +206,7 @@ class LauncherModel(private val app: LauncherApp) {
                 val j = arr.getJSONObject(i)
                 val m = Item(j.getLong("id"), j.getInt("t"))
                 m.container = j.optInt("c"); m.parent = j.optLong("p"); m.page = j.optInt("pg")
-                m.px = j.optInt("x", -1); m.py = j.optInt("y", -1); m.psx = j.optInt("sx", 1); m.psy = j.optInt("sy", 1)
-                m.lx = j.optInt("lx", -1); m.ly = j.optInt("ly", -1); m.lsx = j.optInt("lsx", 1); m.lsy = j.optInt("lsy", 1)
+                m.x = j.optInt("x"); m.y = j.optInt("y"); m.sx = j.optInt("sx", 1); m.sy = j.optInt("sy", 1)
                 m.title = j.optString("ti"); m.pkg = j.optString("pk"); m.cls = j.optString("cl")
                 m.widgetId = j.optInt("w", -1)
                 items.add(m)
@@ -228,8 +226,7 @@ class LauncherModel(private val app: LauncherApp) {
         for (m in items) {
             val j = JSONObject()
             j.put("id", m.id); j.put("t", m.type); j.put("c", m.container); j.put("p", m.parent)
-            j.put("pg", m.page); j.put("x", m.px); j.put("y", m.py); j.put("sx", m.psx); j.put("sy", m.psy)
-            j.put("lx", m.lx); j.put("ly", m.ly); j.put("lsx", m.lsx); j.put("lsy", m.lsy)
+            j.put("pg", m.page); j.put("x", m.x); j.put("y", m.y); j.put("sx", m.sx); j.put("sy", m.sy)
             j.put("ti", m.title); j.put("pk", m.pkg); j.put("cl", m.cls); j.put("w", m.widgetId)
             arr.put(j)
         }
@@ -446,19 +443,14 @@ class LauncherModel(private val app: LauncherApp) {
 
     /** Re-seat items after grid/dock size changes. */
     /**
-     * Portrait and landscape keep their own cell positions. Makes the active orientation valid: items with no
-     * position yet (first rotation, or added while the other orientation was active) are placed in the reading
-     * order of the other layout; out-of-bounds or overlapping items are moved to the first free cell.
+     * The home layout is shared by portrait and landscape, so the order never changes when the tablet rotates.
+     * This only repairs a layout that no longer fits the grid (grid made smaller, overlapping items): such
+     * items move to the first free cell.
      */
     fun ensureLayout(cols: Int, rows: Int): Boolean {
-        val land = Orient.land
         var changed = false
         val homes = items.filter { it.container == Item.HOME }
-        val sorted = homes.sortedWith(compareBy<Item>(
-            { pageOrder.indexOf(it.page) },
-            { if (land) it.py else it.ly },
-            { if (land) it.px else it.lx }
-        ))
+        val sorted = homes.sortedWith(compareBy<Item>({ pageOrder.indexOf(it.page) }, { it.y }, { it.x }))
         val occ = HashMap<Int, Array<BooleanArray>>()
         fun grid(pg: Int) = occ.getOrPut(pg) { Array(rows) { BooleanArray(cols) } }
         fun isFree(g: Array<BooleanArray>, x: Int, y: Int, sx: Int, sy: Int): Boolean {
@@ -471,13 +463,8 @@ class LauncherModel(private val app: LauncherApp) {
         }
         val todo = ArrayList<Item>()
         for (m in sorted) {
-            if (m.x < 0 || m.y < 0) {
-                m.sx = min(max(1, if (land) m.psx else m.lsx), cols)
-                m.sy = min(max(1, if (land) m.psy else m.lsy), rows)
-                todo.add(m); changed = true; continue
-            }
-            val nsx = min(m.sx, cols)
-            val nsy = min(m.sy, rows)
+            val nsx = min(max(1, m.sx), cols)
+            val nsy = min(max(1, m.sy), rows)
             if (nsx != m.sx || nsy != m.sy) { m.sx = nsx; m.sy = nsy; changed = true }
             val g = grid(m.page)
             if (!isFree(g, m.x, m.y, m.sx, m.sy)) { todo.add(m); changed = true; continue }

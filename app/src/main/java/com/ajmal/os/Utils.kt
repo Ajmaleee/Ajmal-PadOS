@@ -34,14 +34,15 @@ fun label(ctx: Context, text: String, sizeSp: Float, color: Int): TextView {
 
 /**
  * Interface size. Some tablets report a very low density (the Lenovo Tab M10 reports 160, so 1 dp = 1 px and
- * everything looks tiny). Auto scales the launcher as if the screen were 213 dpi; Settings can override it.
+ * everything looks tiny). Automatic scales the launcher as if the screen were 213 dpi; the Settings slider then adjusts around that (100% = recommended).
  */
 object UiScale {
+    /** Effective % of the system density: the automatic base for this screen times the user's setting. */
     fun percent(): Int {
-        val v = try { LauncherApp.get().prefs.int(K.UI_SCALE) } catch (e: Throwable) { 0 }
-        if (v > 0) return Math.max(70, v)
         val phys = Resources.getSystem().configuration.densityDpi
-        return if (phys in 1..199) (213f / phys * 100f).toInt() else 100
+        val base = if (phys in 1..199) 213f / phys else 1f
+        val rel = try { LauncherApp.get().prefs.int(K.UI_SCALE) } catch (e: Throwable) { 100 }
+        return (base * rel).toInt().coerceIn(60, 300)
     }
 
     fun wrap(base: Context): Context {

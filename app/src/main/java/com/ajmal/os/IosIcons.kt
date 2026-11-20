@@ -21,7 +21,7 @@ class IosShape(
 )
 
 class IosSpec(
-    val id: String, val c1: Int, val c2: Int, val ink: Int, val accent: Int,
+    val id: String, val name: String, val c1: Int, val c2: Int, val ink: Int, val accent: Int,
     val darkNative: Boolean, val shapes: List<IosShape>
 )
 
@@ -32,6 +32,10 @@ class IosSpec(
  */
 object IosIcons {
     private const val INK = 1
+
+    /** Set from the "iOS-style system app icons" preference; also switches app names to the iOS ones. */
+    @Volatile var on = true
+
     private val byId: Map<String, IosSpec> = IosIconData.all.associateBy { it.id }
     private val matched = ConcurrentHashMap<String, String>()
     private val paths = ConcurrentHashMap<String, Path>()
@@ -72,7 +76,7 @@ object IosIcons {
 
     /** Changes the cache key once a day for the Calendar icon, which shows today's date. */
     fun salt(a: AppInfo): Int {
-        val sp = match(a.pkg, a.label) ?: return 0
+        val sp = match(a.pkg, a.rawLabel) ?: return 0
         return if (sp.id == "calendar") Calendar.getInstance().get(Calendar.DAY_OF_YEAR) else 0
     }
 

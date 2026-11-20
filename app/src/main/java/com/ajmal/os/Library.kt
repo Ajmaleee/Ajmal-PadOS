@@ -290,7 +290,7 @@ private fun hideIme(h: HomeActivity, v: View) {
 }
 
 /** Shared bitmap lookup that asks the icon cache for missing icons once and repaints when they arrive. */
-private class IconSource(private val v: View) {
+internal class IconSource(private val v: View) {
     private val app = LauncherApp.get()
     private val pending = HashSet<String>()
 
@@ -528,7 +528,7 @@ private class Group(val title: String, val display: List<AppInfo>, val all: List
  * App Library in the style of iOS: search bar on top, a 2-column grid of category cards. Tapping the
  * search bar switches to an A-Z list. Pulling down from the top returns to the home screen.
  */
-class LibraryOverlay(private val h: HomeActivity) {
+class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = null) {
     val view = FrameLayout(h)
     private val content = LinearLayout(h)
     private val edit = styleEdit(h, "App Library")
@@ -545,7 +545,9 @@ class LibraryOverlay(private val h: HomeActivity) {
         { if (searching) !list.canScrollVertically(-1) else !scroll.canScrollVertically(-1) },
         { if (searching) { exitSearch(); false } else { close(); true } }
     )
-    private val anim = OverlayAnim(view, h.dpf(40f), h.overlayLayer) { h.libraryGone() }
+    private var closing = false
+    private var genie: GenieView? = null
+    private var snap: Bitmap? = null
 
     init {
         val bd = GlassFrame(h)
@@ -609,14 +611,104 @@ class LibraryOverlay(private val h: HomeActivity) {
         buildGrid()
     }
 
-    fun show() = anim.show()
+    private fun dur(ms: Long): Long = (ms * 100f / h.prefs.int(K.ANIM_SPEED).coerceAtLeast(30)).toLong()
+
+    private fun srcRect(): RectF {
+        val v = srcView
+        val s: Float
+        val cx: Float
+        val cy: Float
+        if (v != null && v.isAttachedToWindow) {
+            val loc = IntArray(2)
+            v.getLocationInWindow(loc)
+            s = h.dockIconPx.toFloat().coerceAtLeast(h.dpf(40f))
+            cx = loc[0] + v.width / 2f
+            cy = loc[1] + v.height / 2f
+        } else {
+            s = h.dpf(56f)
+            cx = h.screenW / 2f
+            cy = h.screenH - h.dpf(60f)
+        }
+        return RectF(cx - s / 2f, cy - s / 2f, cx + s / 2f, cy + s / 2f)
+    }
+
+    private fun snapshot(): Bitmap? {
+        val w = view.width
+        val hh = view.height
+        if (w <= 0 || hh <= 0) return null
+        return try {
+            val b = Bitmap.createBitmap(w, hh, Bitmap.Config.ARGB_8888)
+            view.draw(Canvas(b))
+            b
+        } catch (t: Throwable) { null }
+    }
+
+    /** Opens with a genie animation out of the dock's library icon. */
+    fun show() {
+        h.overlayLayer.addView(view, FrameLayout.LayoutParams(-1, -1))
+        view.visibility = View.INVISIBLE
+        // First open: give the icon cache a moment so the snapshot isn't full of placeholders.
+        view.postDelayed({ genieOpen() }, if (warmed) 0L else 150L)
+        warmed = true
+    }
+
+    private fun genieOpen() {
+        if (closing) return
+        val bmp = if (h.prefs.bool(K.REDUCE_MOTION)) null else snapshot()
+        if (bmp == null) {
+            view.alpha = 0f
+            view.visibility = View.VISIBLE
+            view.animate().alpha(1f).setDuration(160).start()
+            return
+        }
+        val gv = GenieView(h, bmp, srcRect())
+        genie = gv
+        snap = bmp
+        h.overlayLayer.addView(gv, FrameLayout.LayoutParams(-1, -1))
+        gv.animateTo(1f, dur(440)) {
+            view.visibility = View.VISIBLE
+            h.overlayLayer.removeView(gv)
+            genie = null
+            snap?.recycle()
+            snap = null
+        }
+    }
+
+    private fun finishClose() {
+        genie?.let { h.overlayLayer.removeView(it) }
+        genie = null
+        snap?.recycle()
+        snap = null
+        h.overlayLayer.removeView(view)
+        h.libraryGone()
+    }
 
     fun close() {
+        if (closing) return
+        closing = true
         hideIme(h, edit)
         sheet?.let { view.removeView(it) }
         sheet = null
-        anim.hide()
+        val running = genie
+        if (running != null) {          // closed while still opening: reverse from where it is
+            running.animateTo(0f, dur(300)) { finishClose() }
+            return
+        }
+        val bmp = if (h.prefs.bool(K.REDUCE_MOTION)) null else snapshot()
+        if (bmp == null) {
+            view.animate().alpha(0f).setDuration(140).withEndAction { finishClose() }.start()
+            return
+        }
+        val gv = GenieView(h, bmp, srcRect())
+        gv.t = 1f
+        genie = gv
+        snap = bmp
+        h.overlayLayer.addView(gv, FrameLayout.LayoutParams(-1, -1))
+        view.visibility = View.INVISIBLE
+        gv.animateTo(0f, dur(340)) { finishClose() }
     }
+
+    companion object { private var warmed = false }
 
     /** Back button: close the category sheet, then the search list, then the library. */
     fun back() {
@@ -658,7 +750,7 @@ class LibraryOverlay(private val h: HomeActivity) {
     private fun rebuildList() {
         val q = query.trim().lowercase()
         val all = h.model.apps
-        adapter.set(sectionRows(if (q.isEmpty()) all else all.filter { it.lower.contains(q) }), true)
+        adapter.set(sectionRows(if (q.isEmpty()) all else all.filter { it.matches(q) }), true)
     }
 
     private fun buildGrid() {
@@ -836,7 +928,7 @@ class SearchOverlay(private val h: HomeActivity) {
                 for (s in m.searches) out.add(Row(2, s, null))
             }
         } else {
-            val hits = m.apps.filter { it.lower.contains(q) }
+            val hits = m.apps.filter { it.matches(q) }
                 .sortedWith(compareBy<AppInfo>({ if (it.lower.startsWith(q)) 0 else 1 }, { -(m.usage[it.key] ?: 0) }, { it.lower }))
             for (a in hits.take(60)) out.add(Row(1, a.label, a))
         }

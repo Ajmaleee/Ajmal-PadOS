@@ -39,7 +39,13 @@ The workflow also prints package / SDK levels / HOME-filter check from the built
   centre-cropped at offset 0.5 (the launcher pins offsets there). Parallax is not implemented.
 - Live wallpapers work (system draws them) but glass falls back to flat translucency.
 - Icons: only your own / licensed images (long-press → *Change icon*, or import a zip of `<package>.png`).
-- Portrait and landscape: each orientation keeps its own home layout (grid size is set separately under Settings → Home screen).
-  The first time you rotate, icons are carried over in reading order; after that each layout is remembered. Swipe left/right are page navigation when set to Next/Previous page; set them to other actions
+- Portrait and landscape share ONE home layout and grid, so your app order is identical in both orientations (cell sizes adapt). Swipe left/right are page navigation when set to Next/Previous page; set them to other actions
   and paging is replaced by those actions.
 - "Lock screen" uses a device-admin *force-lock* policy (no accessibility service).
+
+## Lenovo Tab M10 (TB-X505X, Android 10) notes
+
+- Density 160 makes 1 dp = 1 px, so the launcher scales its interface automatically (Settings -> Appearance -> Interface size, 100% = recommended).
+- Productivity-mode taskbar / 3-button bar: hidden by default (swipe from the bottom edge to show it). Switch it off in Settings to keep the bar and have the dock sit above it.
+- App Library: button at the right end of the dock (genie animation), also opens when you swipe past the last page.
+- Recognised system apps use iOS names and iOS-style icons (switch off under Icons).

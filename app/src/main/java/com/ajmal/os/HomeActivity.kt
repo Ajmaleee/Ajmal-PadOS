@@ -20,6 +20,7 @@ import android.view.Choreographer
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -63,6 +64,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     lateinit var dragLayer: FrameLayout
     private lateinit var dim: View
     private lateinit var dots: PageDots
+    private lateinit var libDock: LibraryDockIcon
     private lateinit var pill: GlassFrame
     private lateinit var editBar: LinearLayout
 
@@ -75,7 +77,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     var rows = 6
     var dockCount = 4
     var iconPx = 0
-    private var dockIconPx = 0
+    var dockIconPx = 0
     private var pagerH = 0
     private var hs = 0
     private var dockVisible = true
@@ -105,8 +107,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         prefs = app.prefs
         model = app.model
         refreshScreen()
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        applyImmersive()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val sb = resources.getIdentifier("status_bar_height", "dimen", "android")
         insetTop = if (sb > 0) resources.getDimensionPixelSize(sb) else dpi(24)
@@ -115,9 +116,15 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         drag = DragController(this)
         buildChrome()
         setContentView(root)
+        window.decorView.setOnSystemUiVisibilityChangeListener { vis ->
+            // The bar was swiped in: let it go away again by itself after a moment.
+            if (prefs.bool(K.HIDE_NAV) && (vis and View.SYSTEM_UI_FLAG_HIDE_NAVIGATION) == 0) {
+                window.decorView.postDelayed({ applyImmersive() }, 2800)
+            }
+        }
         root.setOnApplyWindowInsetsListener { _, ins ->
             insetTop = ins.stableInsetTop
-            insetBottom = ins.stableInsetBottom
+            insetBottom = bottomInset(ins)
             val ime = ins.systemWindowInsetBottom
             library?.setBottomInset(ime)
             search?.setBottomInset(ime)
@@ -128,6 +135,36 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         app.glass.changeCbs.add { for (v in viewCache.values) v.invalidate() }
         model.whenReady { applyAll() }
         askWallpaperAccess()
+    }
+
+    /**
+     * Android 10 with Lenovo's Productivity taskbar: hide the bottom bar (swipe from the bottom edge brings it
+     * back for a moment). With it hidden the dock sits at the screen edge; if the bar stays visible anyway, or
+     * hiding is switched off, the actual bar height is reserved so nothing is covered.
+     */
+    private fun applyImmersive() {
+        var f = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (prefs.bool(K.HIDE_NAV)) f = f or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        window.decorView.systemUiVisibility = f
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            window.setNavigationBarContrastEnforced(false)
+            window.setStatusBarContrastEnforced(false)
+        }
+    }
+
+    private fun bottomInset(ins: WindowInsets): Int {
+        if (!prefs.bool(K.HIDE_NAV)) return ins.stableInsetBottom
+        // What is really on screen now (0 while the bar is hidden), never the IME.
+        val bar = if (android.os.Build.VERSION.SDK_INT >= 29) ins.tappableElementInsets.bottom else ins.stableInsetBottom
+        // Keep clear of the gesture-navigation home bar if one is shown.
+        val gest = if (android.os.Build.VERSION.SDK_INT >= 29) min(ins.systemGestureInsets.bottom, dpi(24)) else 0
+        return max(bar, gest)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyImmersive()
     }
 
     /** Reads the real display size (portrait or landscape) and selects that orientation's layout. */
@@ -183,6 +220,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
 
     override fun onResume() {
         super.onResume()
+        applyImmersive()
         if (UiScale.percent() != scaleApplied) { recreate(); return }
         app.glass.reloadIfChanged()
         if (model.ready && prefs.rev != appliedRev) applyAll()
@@ -268,6 +306,8 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         dockFrame.radiusDp = 30f
         dockLayout = CellLayout(this)
         dockFrame.addView(dockLayout, FrameLayout.LayoutParams(-1, -1))
+        libDock = LibraryDockIcon(this, this)
+        dockFrame.addView(libDock, FrameLayout.LayoutParams(dpi(80), -1, Gravity.END))
         root.addView(dockFrame, FrameLayout.LayoutParams(-1, dpi(80), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
 
         editBar = LinearLayout(this)
@@ -305,10 +345,11 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         var s = dpi(prefs.int(K.ICON_SIZE))
         if (prefs.bool(K.LARGE_ICONS)) s = (s * 1.25f).toInt()
         dockVisible = prefs.bool(K.DOCK_VISIBLE)
-        dockW = min(screenW - dpi(28), dpi(116) * dockCount + dpi(32))
-        val dockCellW = (dockW - dpi(16)) / dockCount
+        val dockCells = dockCount + 1   // the last slot is the App Library button
+        dockW = min(screenW - dpi(28), dpi(116) * dockCells + dpi(32))
+        val dockCellW = (dockW - dpi(16)) / dockCells
         dockIconPx = min(dpi(prefs.int(K.DOCK_ICON)), (dockCellW * 0.8f).toInt())
-        val dockH = (dockIconPx * 1.32f).toInt() + dpi(8)
+        val dockH = dockIconPx + 2 * IconCache.padFor(dockIconPx) + dpi(18)
         val dockBottom = insetBottom + dpi(prefs.int(K.DOCK_MARGIN))
         var y = dockBottom + (if (dockVisible) dockH else 0)
         val pillOn = prefs.bool(K.SEARCH_PILL)
@@ -347,6 +388,13 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         (dockFrame.layoutParams as FrameLayout.LayoutParams).apply {
             height = m.dockH; bottomMargin = m.dockBottom; width = dockW
         }
+        val dockCellPx = (dockW - 2 * dpi(8)) / (dockCount + 1)
+        (dockLayout.layoutParams as FrameLayout.LayoutParams).apply {
+            width = dockCellPx * dockCount + 2 * dpi(8); height = -1; gravity = Gravity.START
+        }
+        (libDock.layoutParams as FrameLayout.LayoutParams).apply {
+            width = dockCellPx + dpi(8); height = -1; gravity = Gravity.END
+        }
         dockFrame.visibility = if (dockVisible) View.VISIBLE else View.GONE
         dockFrame.drawBg = prefs.bool(K.DOCK_BG)
         dockFrame.strength = 0.4f + prefs.int(K.DOCK_GLASS) / 100f
@@ -366,6 +414,8 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
 
     private fun applyAll() {
         appliedRev = prefs.rev
+        IosIcons.on = prefs.bool(K.IOS_ICONS)
+        model.resort()
         applyChrome()
         model.ensureLayout(cols, rows)
         model.normalize(cols, rows, dockCount)
@@ -442,6 +492,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             used.add(m.id)
             dockLayout.addView(v)
         }
+        libDock.refresh()
         // views for folder children are not cached here; drop anything no longer present
         viewCache.keys.retainAll(used)
         if (dead.isNotEmpty()) { model.items.removeAll(dead.toSet()); model.save() }
@@ -678,10 +729,14 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         library?.close(); search?.close(); overview?.close()
     }
 
-    fun openLibrary() {
+    fun openLibrary(src: View? = null) {
         if (library != null) return
         setEditing(false)
-        library = LibraryOverlay(this).also { it.show() }
+        library = LibraryOverlay(this, src ?: (if (dockVisible) libDock else null)).also { it.show() }
+    }
+
+    override fun onOverscroll() {
+        openLibrary()
     }
 
     fun openSearch() {

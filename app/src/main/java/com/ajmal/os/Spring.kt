@@ -30,6 +30,9 @@ class Spring(private val onUpdate: (Float) -> Unit) {
         onUpdate(v)
     }
 
+    /** Start the next animation from [v] (the on-screen position) rather than from where the last one ended. */
+    fun setValue(v: Float) { value = v }
+
     fun stop() {
         if (isRunning) {
             isRunning = false

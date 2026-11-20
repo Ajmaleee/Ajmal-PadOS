@@ -19,6 +19,7 @@ interface PagerCallbacks {
     fun onAction(a: Int)
     fun onLongPressEmpty(x: Float, y: Float)
     fun onPinchIn()
+    fun onOverscroll()
 }
 
 /**
@@ -93,7 +94,24 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
         index = t
         val w = width.toFloat()
         spring.restDelta = 0.5f
+        spring.setValue(pos)   // start from where the page actually is (also makes the edge bounce smooth)
         spring.to(t * w, 230f, -v0) { cb.onPageSettled(t) }
+    }
+
+    /** Finger-driven, unbounded position; the on-screen [pos] is this with edge resistance applied. */
+    private var raw = 0f
+
+    private fun damp(o: Float, d: Float): Float = if (d <= 0f) 0f else (1f - 1f / (o * 0.55f / d + 1f)) * d
+
+    private fun rubber(r: Float): Float {
+        val w = width.toFloat()
+        val maxPos = max(0, pages.size - 1) * w
+        val d = w * 0.45f
+        return when {
+            r < 0f -> -damp(-r, d)
+            r > maxPos -> maxPos + damp(r - maxPos, d)
+            else -> r
+        }
     }
 
     private fun setPos(v: Float) {
@@ -135,7 +153,7 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
         if (axis != 0) return axis != 0
         val dx = e.x - downX
         val dy = e.y - downY
-        if (abs(dx) > slop && abs(dx) > abs(dy)) { axis = 1; lastX = e.x; return true }
+        if (abs(dx) > slop && abs(dx) > abs(dy)) { axis = 1; lastX = e.x; raw = pos; return true }
         if (abs(dy) > slop && abs(dy) > abs(dx) && !onWidget) { axis = 2; return true }
         return false
     }
@@ -151,7 +169,7 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
                 tracker?.recycle()
                 tracker = VelocityTracker.obtain()
                 tracker!!.addMovement(e)
-                if (spring.isRunning) { axis = 1; spring.stop(); return true }
+                if (spring.isRunning) { axis = 1; spring.stop(); raw = pos; return true }
             }
             MotionEvent.ACTION_MOVE -> {
                 tracker?.addMovement(e)
@@ -173,9 +191,8 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
                 if (axis == 1 && paging) {
                     val dx = lastX - e.x
                     lastX = e.x
-                    val max = (pages.size - 1) * width.toFloat()
-                    val np = if ((pos < 0f && dx < 0f) || (pos > max && dx > 0f)) pos + dx * 0.35f else pos + dx
-                    setPos(np)
+                    raw += dx
+                    setPos(rubber(raw))
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> finish(e)
@@ -213,6 +230,12 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
     private fun settle(vx: Float) {
         val w = width.toFloat()
         if (w <= 0f) return
+        val maxPos = (pages.size - 1) * w
+        if (pages.isNotEmpty() && prefs.bool(K.LIB_SWIPE) && (pos > maxPos + 64f * dp || (pos > maxPos - 6f && vx < -1100f))) {
+            goTo(pages.size - 1, 0f)
+            cb.onOverscroll()
+            return
+        }
         val cur = pos / w
         var target = cur.roundToInt()
         if (vx < -600f) target = floor(cur).toInt() + 1

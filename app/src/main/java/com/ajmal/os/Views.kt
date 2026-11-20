@@ -48,6 +48,7 @@ class AppIconView(ctx: Context, private val host: IconHost) : View(ctx) {
     private val fp = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rf = RectF()
     private val sqp = Path()
+    private val bmpPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     private var downX = 0f
     private var downY = 0f
@@ -137,7 +138,7 @@ class AppIconView(ctx: Context, private val host: IconHost) : View(ctx) {
             drawFolder(c, left + pad, top + pad)
         } else {
             val b = iconBmp
-            if (b != null) c.drawBitmap(b, left, top, null)
+            if (b != null) c.drawBitmap(b, Math.round(left).toFloat(), Math.round(top).toFloat(), bmpPaint)
             else {
                 fp.style = Paint.Style.FILL
                 fp.color = 0x33808080

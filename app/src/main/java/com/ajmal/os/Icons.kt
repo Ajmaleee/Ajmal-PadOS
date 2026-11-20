@@ -93,7 +93,7 @@ class IconCache(private val ctx: Context) {
         l.add(cb)
         waiters[key] = l
         exec.execute {
-            val b = try { render(a, size) } catch (t: Throwable) { fallback(size) }
+            val b = try { renderHq(a, size) } catch (t: Throwable) { fallback(size) }
             main.post {
                 cache.put(key, b)
                 val w = waiters.remove(key)
@@ -115,14 +115,23 @@ class IconCache(private val ctx: Context) {
 
     // ------------------------------------------------------------------ rendering
 
-    private fun render(a: AppInfo, s: Int): Bitmap {
+    /** Renders at 2x and averages down: smooth edges on low-density screens. */
+    private fun renderHq(a: AppInfo, s: Int): Bitmap {
+        val pad = padFor(s)
+        val big = render(a, s * 2, pad * 2)
+        val total = s + pad * 2
+        val out = Bitmap.createScaledBitmap(big, total, total, true)
+        if (out !== big) big.recycle()
+        return out
+    }
+
+    private fun render(a: AppInfo, s: Int, pad: Int): Bitmap {
         val app = LauncherApp.get()
         val p = app.prefs
         val mode = p.int(K.ICON_APPEARANCE)
         val rad = p.int(K.ICON_RADIUS) / 100f
         val shadow = p.int(K.SHADOW) / 100f
         val dark = app.isDark()
-        val pad = padFor(s)
         val total = s + pad * 2
         val bmp = Bitmap.createBitmap(total, total, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -200,7 +209,7 @@ class IconCache(private val ctx: Context) {
         val d: Drawable = try { pm.getActivityIcon(ComponentName(a.pkg, a.cls)) } catch (e: Exception) { pm.defaultActivityIcon }
         val tint = LauncherApp.get().tintColor()
         if (LauncherApp.get().prefs.bool(K.IOS_ICONS)) {
-            val sp = IosIcons.match(a.pkg, a.label)
+            val sp = IosIcons.match(a.pkg, a.rawLabel)
             if (sp != null) { IosIcons.draw(c, sp, rect, mode, tint); return }
         }
         val tintDark = mix(tint, Color.BLACK, 0.55f)
