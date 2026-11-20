@@ -1,6 +1,8 @@
 package com.ajmal.os
 
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.widget.TextView
@@ -28,4 +30,25 @@ fun label(ctx: Context, text: String, sizeSp: Float, color: Int): TextView {
     t.textSize = sizeSp
     t.setTextColor(color)
     return t
+}
+
+/**
+ * Interface size. Some tablets report a very low density (the Lenovo Tab M10 reports 160, so 1 dp = 1 px and
+ * everything looks tiny). Auto scales the launcher as if the screen were 213 dpi; Settings can override it.
+ */
+object UiScale {
+    fun percent(): Int {
+        val v = try { LauncherApp.get().prefs.int(K.UI_SCALE) } catch (e: Throwable) { 0 }
+        if (v > 0) return Math.max(70, v)
+        val phys = Resources.getSystem().configuration.densityDpi
+        return if (phys in 1..199) (213f / phys * 100f).toInt() else 100
+    }
+
+    fun wrap(base: Context): Context {
+        val p = percent()
+        if (p == 100) return base
+        val c = Configuration(base.resources.configuration)
+        c.densityDpi = (Resources.getSystem().configuration.densityDpi * p / 100f).toInt()
+        return base.createConfigurationContext(c)
+    }
 }

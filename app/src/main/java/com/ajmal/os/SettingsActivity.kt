@@ -2,6 +2,7 @@ package com.ajmal.os
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.app.ActivityManager
 import android.app.AlertDialog
 import android.app.admin.DevicePolicyManager
@@ -14,6 +15,7 @@ import android.os.Debug
 import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -28,6 +30,10 @@ class SettingsActivity : Activity() {
     private val fg = Color.WHITE
     private val sub = 0xFF8E8E93.toInt()
 
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(UiScale.wrap(base))
+    }
+
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = LauncherApp.get().prefs
@@ -37,7 +43,7 @@ class SettingsActivity : Activity() {
         list = LinearLayout(this)
         list.orientation = LinearLayout.VERTICAL
         list.setPadding(dpi(16), dpi(8), dpi(16), dpi(40))
-        sv.addView(list)
+        sv.addView(list, FrameLayout.LayoutParams(Math.min(resources.displayMetrics.widthPixels, dpi(680)), -2, android.view.Gravity.CENTER_HORIZONTAL))
         setContentView(sv)
         build()
     }
@@ -119,13 +125,14 @@ class SettingsActivity : Activity() {
     }
 
     private fun build() {
-        val title = label(this, "Ajmal OS", 30f, fg)
+        val title = label(this, "AjmalPad OS", 30f, fg)
         title.setTypeface(title.typeface, android.graphics.Typeface.BOLD)
         title.setPadding(dpi(4), dpi(16), 0, 0)
         list.addView(title)
         list.addView(label(this, "Changes apply when you return to the home screen.", 13f, sub).also { it.setPadding(dpi(4), 0, 0, 0) })
 
         header("Appearance")
+        seek("Interface size (0 = automatic)", K.UI_SCALE, 0, 200, "%")
         choice("Theme", K.THEME, arrayOf("Automatic (system)", "Light", "Dark"))
         choice("Glass profile", K.PROFILE, arrayOf("Ultra Lite (default)", "Balanced", "Ultra Glass"))
         seek("Transparency", K.OPACITY, 0, 100, "%")
@@ -152,8 +159,10 @@ class SettingsActivity : Activity() {
         }
 
         header("Home screen")
-        seek("Columns", K.COLS, 3, 6)
-        seek("Rows", K.ROWS, 4, 8)
+        seek("Columns (portrait)", K.COLS, 3, 8)
+        seek("Rows (portrait)", K.ROWS, 3, 9)
+        seek("Columns (landscape)", K.LCOLS, 3, 10)
+        seek("Rows (landscape)", K.LROWS, 3, 8)
         seek("Horizontal spacing", K.HSPACE, 0, 30, " dp")
         seek("Vertical spacing", K.VSPACE, 0, 40, " dp")
         toggle("Page indicator", K.DOTS)
@@ -226,7 +235,7 @@ class SettingsActivity : Activity() {
                 .setNegativeButton("Cancel", null).show()
         }
         action("Reset all settings", null) { prefs.resetAll(); recreate() }
-        action("Set Ajmal OS as default home app", null) {
+        action("Set AjmalPad OS as default home app", null) {
             try { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) } catch (t: Throwable) { }
         }
     }
@@ -268,7 +277,7 @@ class SettingsActivity : Activity() {
                 val text = try { contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) } } catch (t: Throwable) { null }
                 runOnUiThread {
                     val ok = text != null && LauncherApp.get().model.importAll(text)
-                    toast(if (ok) "Imported. Return to the home screen." else "Not a valid Ajmal OS backup")
+                    toast(if (ok) "Imported. Return to the home screen." else "Not a valid AjmalPad OS backup")
                     if (ok) recreate()
                 }
             }.start()

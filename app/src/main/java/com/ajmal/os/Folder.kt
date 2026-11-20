@@ -52,7 +52,7 @@ class FolderOverlay(private val h: HomeActivity, val folder: Item, private val s
         col.addView(title, LinearLayout.LayoutParams(-1, -2))
 
         val n = h.model.children(folder.id).size
-        val panelW = h.screenW - h.dpi(48)
+        val panelW = min(h.screenW - h.dpi(48), h.dpi(520))
         val cellW = (panelW - 2 * pad) / 3
         val sz = min(h.iconPx, (cellW * 0.66f).toInt())
         val cellH = (sz * 1.55f + h.dpf(18f)).toInt()

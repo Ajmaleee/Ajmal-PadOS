@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "AjmalOS"
+rootProject.name = "AjmalPadOS"
 include(":app")

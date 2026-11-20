@@ -20,7 +20,6 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:resumeWhilePausing="true"
-            android:screenOrientation="portrait"
             android:stateNotNeeded="true"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|uiMode|locale|layoutDirection|fontScale">
@@ -34,7 +33,7 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="true"
-            android:label="Ajmal OS Settings"
+            android:label="AjmalPad OS Settings"
             android:taskAffinity=""
             android:theme="@style/Theme.Ajmal.Settings">
             <intent-filter>

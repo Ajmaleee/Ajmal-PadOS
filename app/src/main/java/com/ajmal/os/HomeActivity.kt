@@ -30,7 +30,24 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-class HomeRoot(ctx: Context) : FrameLayout(ctx)
+class HomeRoot(ctx: Context) : FrameLayout(ctx) {
+    private val excl = ArrayList<android.graphics.Rect>()
+
+    /** Keep the system Back gesture off a strip of each edge so horizontal page swipes can start there. */
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val d = resources.displayMetrics.density
+            val e = (20 * d).toInt()
+            val half = (100 * d).toInt()
+            val mid = (b - t) / 2
+            excl.clear()
+            excl.add(android.graphics.Rect(0, mid - half, e, mid + half))
+            excl.add(android.graphics.Rect(r - l - e, mid - half, r - l, mid + half))
+            setSystemGestureExclusionRects(excl)
+        }
+    }
+}
 
 class HomeActivity : Activity(), IconHost, PagerCallbacks {
     lateinit var app: LauncherApp
@@ -87,9 +104,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         app = application as LauncherApp
         prefs = app.prefs
         model = app.model
-        den = resources.displayMetrics.density
-        screenW = app.glass.screenW
-        screenH = app.glass.screenH
+        refreshScreen()
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -115,7 +130,33 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         askWallpaperAccess()
     }
 
-    /** Android 9 only lets a launcher read the wallpaper (needed for the blur) with storage access. */
+    /** Reads the real display size (portrait or landscape) and selects that orientation's layout. */
+    private fun refreshScreen(): Boolean {
+        val dm = android.util.DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(dm)
+        val changed = dm.widthPixels != screenW || dm.heightPixels != screenH
+        screenW = dm.widthPixels
+        screenH = dm.heightPixels
+        den = resources.displayMetrics.density
+        Orient.land = screenW > screenH
+        app.glass.setScreen(screenW, screenH)
+        return changed
+    }
+
+    override fun onConfigurationChanged(c: android.content.res.Configuration) {
+        super.onConfigurationChanged(c)
+        if (!::pager.isInitialized) return
+        if (refreshScreen()) {
+            dismissMenu()
+            folderOverlay?.dismiss(true)
+            library?.close()
+            search?.close()
+            overview?.close()
+            if (model.ready) applyAll()
+        }
+    }
+
+    /** Android 10 only lets a launcher read the wallpaper (needed for the blur) with storage access. */
     private fun askWallpaperAccess() {
         if (android.os.Build.VERSION.SDK_INT < 23) return
         if (!prefs.bool(K.WP_BLUR)) return
@@ -133,8 +174,16 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
 
     override fun onStart() { super.onStart(); widgets.start() }
 
+    private var scaleApplied = 100
+
+    override fun attachBaseContext(base: Context) {
+        scaleApplied = UiScale.percent()
+        super.attachBaseContext(UiScale.wrap(base))
+    }
+
     override fun onResume() {
         super.onResume()
+        if (UiScale.percent() != scaleApplied) { recreate(); return }
         app.glass.reloadIfChanged()
         if (model.ready && prefs.rev != appliedRev) applyAll()
         root.post {
@@ -249,14 +298,14 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     private var lastSig = ""
 
     private fun computeMetrics() {
-        cols = prefs.int(K.COLS)
-        rows = prefs.int(K.ROWS)
+        cols = prefs.cols()
+        rows = prefs.rows()
         dockCount = prefs.int(K.DOCK_COUNT)
         hs = dpi(prefs.int(K.HSPACE))
         var s = dpi(prefs.int(K.ICON_SIZE))
         if (prefs.bool(K.LARGE_ICONS)) s = (s * 1.25f).toInt()
         dockVisible = prefs.bool(K.DOCK_VISIBLE)
-        dockW = screenW - dpi(28)
+        dockW = min(screenW - dpi(28), dpi(116) * dockCount + dpi(32))
         val dockCellW = (dockW - dpi(16)) / dockCount
         dockIconPx = min(dpi(prefs.int(K.DOCK_ICON)), (dockCellW * 0.8f).toInt())
         val dockH = (dockIconPx * 1.32f).toInt() + dpi(8)
@@ -318,6 +367,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     private fun applyAll() {
         appliedRev = prefs.rev
         applyChrome()
+        model.ensureLayout(cols, rows)
         model.normalize(cols, rows, dockCount)
         val it = viewCache.entries.iterator()
         while (it.hasNext()) if (it.next().value !is WidgetFrame) it.remove()

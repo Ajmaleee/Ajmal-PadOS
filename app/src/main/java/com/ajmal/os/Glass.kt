@@ -43,8 +43,15 @@ class GlassRenderer(private val app: LauncherApp) {
     init {
         val dm = DisplayMetrics()
         (app.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(dm)
-        screenW = min(dm.widthPixels, dm.heightPixels)
-        screenH = max(dm.widthPixels, dm.heightPixels)
+        screenW = dm.widthPixels
+        screenH = dm.heightPixels
+    }
+
+    /** Called when the launcher rotates; the wallpaper backdrop is rebuilt for the new shape. */
+    fun setScreen(w: Int, h: Int) {
+        if (w == screenW && h == screenH) return
+        screenW = w; screenH = h
+        reload()
     }
 
     fun add(g: GlassFrame) { if (!listeners.contains(g)) listeners.add(g) }

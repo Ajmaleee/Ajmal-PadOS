@@ -578,7 +578,8 @@ class LibraryOverlay(private val h: HomeActivity) {
         content.addView(list, LinearLayout.LayoutParams(-1, 0, 1f).also { it.topMargin = h.dpi(8) })
 
         pull.isFocusableInTouchMode = true
-        pull.addView(content, FrameLayout.LayoutParams(-1, -1))
+        // Tablets: keep the library a comfortable width and centred.
+        pull.addView(content, FrameLayout.LayoutParams(min(h.screenW, h.dpi(980)), -1, Gravity.CENTER_HORIZONTAL))
         view.addView(pull, FrameLayout.LayoutParams(-1, -1))
 
         edit.setOnFocusChangeListener { _, f -> if (f) enterSearch() }
@@ -679,16 +680,17 @@ class LibraryOverlay(private val h: HomeActivity) {
         val hid = m.apps.filter { hidden.contains(it.key) }
         if (hid.isNotEmpty()) groups.add(Group("Hidden", hid.sortedWith(byUse), hid))
 
-        val dm = h.resources.displayMetrics
         val gap = h.dpi(14)
-        val cw = (dm.widthPixels - h.dpi(32) - gap) / 2
-        for (pair in groups.chunked(2)) {
+        val avail = min(h.screenW, h.dpi(980)) - h.dpi(32)
+        val n = (avail / h.dpi(165)).coerceIn(2, 5)
+        val cw = (avail - gap * (n - 1)) / n
+        for (pair in groups.chunked(n)) {
             val row = LinearLayout(h)
             row.orientation = LinearLayout.HORIZONTAL
             for ((i, g) in pair.withIndex()) {
                 val card = CategoryCardView(h, h, g.title, g.display, cw, { openSheet(g.title, g.all) }, { close() })
                 val lp = LinearLayout.LayoutParams(cw, -2)
-                if (i == 0) lp.rightMargin = gap
+                if (i < n - 1) lp.rightMargin = gap
                 row.addView(card, lp)
             }
             gridHost.addView(row, LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = h.dpi(6) })
@@ -713,7 +715,9 @@ class LibraryOverlay(private val h: HomeActivity) {
         val t = label(h, title, 20f, fg)
         t.setTypeface(t.typeface, Typeface.BOLD)
         col.addView(t)
-        val grid = AppGridView(h, h, apps, 4, 56) { close() }
+        val panelW = min(h.screenW - h.dpi(32), h.dpi(560))
+        val sheetCols = ((panelW - h.dpi(32)) / h.dpi(88)).coerceIn(4, 6)
+        val grid = AppGridView(h, h, apps, sheetCols, 60) { close() }
         val sv = ScrollView(h)
         sv.isVerticalScrollBarEnabled = false
         sv.overScrollMode = View.OVER_SCROLL_NEVER
@@ -721,7 +725,7 @@ class LibraryOverlay(private val h: HomeActivity) {
         val maxH = (dm.heightPixels * 0.6f).toInt()
         col.addView(sv, LinearLayout.LayoutParams(-1, min(grid.gridHeight(), maxH)).also { it.topMargin = h.dpi(10) })
         panel.addView(col, FrameLayout.LayoutParams(-1, -2))
-        layer.addView(panel, FrameLayout.LayoutParams(dm.widthPixels - h.dpi(32), -2, Gravity.CENTER))
+        layer.addView(panel, FrameLayout.LayoutParams(panelW, -2, Gravity.CENTER))
         view.addView(layer, FrameLayout.LayoutParams(-1, -1))
 
         layer.alpha = 0f
@@ -768,7 +772,7 @@ class SearchOverlay(private val h: HomeActivity) {
         styleList(list)
         list.adapter = adapter
         content.addView(list, LinearLayout.LayoutParams(-1, 0, 1f).also { it.topMargin = h.dpi(8) })
-        pull.addView(content, FrameLayout.LayoutParams(-1, -1))
+        pull.addView(content, FrameLayout.LayoutParams(min(h.screenW, h.dpi(640)), -1, Gravity.CENTER_HORIZONTAL))
         view.addView(pull, FrameLayout.LayoutParams(-1, -1))
 
         edit.addTextChangedListener(object : TextWatcher {

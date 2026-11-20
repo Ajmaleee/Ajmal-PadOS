@@ -4,14 +4,15 @@ plugins {
 }
 
 android {
+    // Source package stays com.ajmal.os; the installed app id differs so it can sit beside Ajmal OS.
     namespace = "com.ajmal.os"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.ajmal.os"
-        minSdk = 28
-        // Target 28 on purpose: Android 9 behaviour, no package-visibility filtering.
-        targetSdk = 28
+        applicationId = "com.ajmal.pados"
+        minSdk = 29
+        // Android 10 (API 29): last level before package-visibility filtering, so the app list needs no QUERY_ALL_PACKAGES.
+        targetSdk = 29
         versionCode = 1
         versionName = "1.0.0"
     }

@@ -1,4 +1,4 @@
-name: Build Ajmal OS
+name: Build AjmalPad OS
 
 on:
   push:
@@ -45,13 +45,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AjmalOS-debug-apk
+          name: AjmalPadOS-debug-apk
           path: app/build/outputs/apk/debug/*.apk
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AjmalOS-release-apk
+          name: AjmalPadOS-release-apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: ignore
 

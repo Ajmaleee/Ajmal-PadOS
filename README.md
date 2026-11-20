@@ -1,20 +1,21 @@
-# Ajmal OS — native Android launcher (Liquid Glass edition)
+# AjmalPad OS — native Android launcher for the Lenovo Tab M10 (Liquid Glass edition)
 
 Pure Kotlin + Android framework APIs. **Zero third-party dependencies**, no WebView/Flutter/RN, no network code,
-no analytics. Package `com.ajmal.os`, minSdk 28, targetSdk 28 (Android 9 behaviour), ARM64-compatible (no native code).
+no analytics. App id `com.ajmal.pados` (installs beside Ajmal OS), minSdk 29, targetSdk 29 (Android 10), ARM64-compatible (no native code).
+Target: Lenovo Tab M10 TB-X505X, 1280×800, Snapdragon 429, ~2.8 GiB RAM.
 
 ## Build
-**GitHub:** push this folder to a repo → Actions → *Build Ajmal OS* → download artifact `AjmalOS-debug-apk`.
+**GitHub:** push this folder to a repo → Actions → *Build AjmalPad OS* → download artifact `AjmalPadOS-debug-apk`.
 The workflow also prints package / SDK levels / HOME-filter check from the built APK.
 
 **Local:** `gradle wrapper --gradle-version 8.5` once, then `./gradlew assembleDebug`
 (APK: `app/build/outputs/apk/debug/app-debug.apk`). Needs JDK 17 + Android SDK platform 34.
 
-## Install (Nokia TA-1004)
+## Install (Lenovo Tab M10 TB-X505X)
 1. Enable *Install unknown apps* for your file manager / browser, install the APK (or `adb install -r app-debug.apk`).
-2. Press Home → choose **Ajmal OS** → *Always*. (Or Settings → Apps → Default apps → Home app.)
-3. Optional: open **Ajmal OS Settings** → *Wallpaper → Grant wallpaper access* so the glass can blur your wallpaper
-   (Android 9 requires storage permission to read it; without it the glass is flat translucent).
+2. Press Home → choose **AjmalPad OS** → *Always*. (Or Settings → Apps → Default apps → Home app.)
+3. Optional: open **AjmalPad OS Settings** → *Wallpaper → Grant wallpaper access* so the glass can blur your wallpaper
+   (Android 10 requires storage permission to read it; without it the glass is flat translucent).
 
 ## Architecture
 | File | Role |
@@ -38,6 +39,7 @@ The workflow also prints package / SDK levels / HOME-filter check from the built
   centre-cropped at offset 0.5 (the launcher pins offsets there). Parallax is not implemented.
 - Live wallpapers work (system draws them) but glass falls back to flat translucency.
 - Icons: only your own / licensed images (long-press → *Change icon*, or import a zip of `<package>.png`).
-- Portrait only. Swipe left/right are page navigation when set to Next/Previous page; set them to other actions
+- Portrait and landscape: each orientation keeps its own home layout (grid size is set separately under Settings → Home screen).
+  The first time you rotate, icons are carried over in reading order; after that each layout is remembered. Swipe left/right are page navigation when set to Next/Previous page; set them to other actions
   and paging is replaced by those actions.
 - "Lock screen" uses a device-admin *force-lock* policy (no accessibility service).

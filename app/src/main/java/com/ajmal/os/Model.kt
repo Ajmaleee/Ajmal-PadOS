@@ -28,14 +28,34 @@ class AppInfo(
     val lower: String = label.lowercase()
 }
 
+/** True while the display is wider than tall. Home items keep one layout per orientation. */
+object Orient {
+    @Volatile var land = false
+}
+
 class Item(var id: Long, var type: Int) {
     var container = HOME
     var parent = 0L
+    /** Shared by both orientations. */
     var page = 0
-    var x = 0
-    var y = 0
-    var sx = 1
-    var sy = 1
+    // Portrait cell / span. Also used for dock slots and folder indices, which are orientation-independent.
+    var px = -1; var py = -1; var psx = 1; var psy = 1
+    // Landscape cell / span (home container only).
+    var lx = -1; var ly = -1; var lsx = 1; var lsy = 1
+
+    private val useL: Boolean get() = Orient.land && container == HOME
+    var x: Int
+        get() = if (useL) lx else px
+        set(v) { if (useL) lx = v else px = v }
+    var y: Int
+        get() = if (useL) ly else py
+        set(v) { if (useL) ly = v else py = v }
+    var sx: Int
+        get() = if (useL) lsx else psx
+        set(v) { if (useL) lsx = v else psx = v }
+    var sy: Int
+        get() = if (useL) lsy else psy
+        set(v) { if (useL) lsy = v else psy = v }
     var title = ""
     var pkg = ""
     var cls = ""
@@ -187,7 +207,8 @@ class LauncherModel(private val app: LauncherApp) {
                 val j = arr.getJSONObject(i)
                 val m = Item(j.getLong("id"), j.getInt("t"))
                 m.container = j.optInt("c"); m.parent = j.optLong("p"); m.page = j.optInt("pg")
-                m.x = j.optInt("x"); m.y = j.optInt("y"); m.sx = j.optInt("sx", 1); m.sy = j.optInt("sy", 1)
+                m.px = j.optInt("x", -1); m.py = j.optInt("y", -1); m.psx = j.optInt("sx", 1); m.psy = j.optInt("sy", 1)
+                m.lx = j.optInt("lx", -1); m.ly = j.optInt("ly", -1); m.lsx = j.optInt("lsx", 1); m.lsy = j.optInt("lsy", 1)
                 m.title = j.optString("ti"); m.pkg = j.optString("pk"); m.cls = j.optString("cl")
                 m.widgetId = j.optInt("w", -1)
                 items.add(m)
@@ -207,7 +228,8 @@ class LauncherModel(private val app: LauncherApp) {
         for (m in items) {
             val j = JSONObject()
             j.put("id", m.id); j.put("t", m.type); j.put("c", m.container); j.put("p", m.parent)
-            j.put("pg", m.page); j.put("x", m.x); j.put("y", m.y); j.put("sx", m.sx); j.put("sy", m.sy)
+            j.put("pg", m.page); j.put("x", m.px); j.put("y", m.py); j.put("sx", m.psx); j.put("sy", m.psy)
+            j.put("lx", m.lx); j.put("ly", m.ly); j.put("lsx", m.lsx); j.put("lsy", m.lsy)
             j.put("ti", m.title); j.put("pk", m.pkg); j.put("cl", m.cls); j.put("w", m.widgetId)
             arr.put(j)
         }
@@ -240,7 +262,7 @@ class LauncherModel(private val app: LauncherApp) {
 
     fun exportAll(): String {
         val o = JSONObject()
-        o.put("app", "ajmal-os"); o.put("version", 1)
+        o.put("app", "ajmalpad-os"); o.put("version", 1)
         o.put("prefs", app.prefs.exportJson()); o.put("state", toJson())
         return o.toString(2)
     }
@@ -248,7 +270,7 @@ class LauncherModel(private val app: LauncherApp) {
     fun importAll(text: String): Boolean {
         return try {
             val o = JSONObject(text)
-            if (o.optString("app") != "ajmal-os") return false
+            if (o.optString("app") != "ajmalpad-os") return false
             val st = o.getJSONObject("state")
             app.prefs.importJson(o.getJSONObject("prefs"))
             parse(st)
@@ -270,8 +292,8 @@ class LauncherModel(private val app: LauncherApp) {
     // ---------------------------------------------------------------- reconcile
 
     fun reconcile() {
-        val cols = app.prefs.int(K.COLS)
-        val rows = app.prefs.int(K.ROWS)
+        val cols = app.prefs.cols()
+        val rows = app.prefs.rows()
         var changed = false
         if (pageOrder.isEmpty()) { pageOrder.add(0); if (nextPage < 1) nextPage = 1; changed = true }
         val iter = items.iterator()
@@ -423,6 +445,71 @@ class LauncherModel(private val app: LauncherApp) {
     }
 
     /** Re-seat items after grid/dock size changes. */
+    /**
+     * Portrait and landscape keep their own cell positions. Makes the active orientation valid: items with no
+     * position yet (first rotation, or added while the other orientation was active) are placed in the reading
+     * order of the other layout; out-of-bounds or overlapping items are moved to the first free cell.
+     */
+    fun ensureLayout(cols: Int, rows: Int): Boolean {
+        val land = Orient.land
+        var changed = false
+        val homes = items.filter { it.container == Item.HOME }
+        val sorted = homes.sortedWith(compareBy<Item>(
+            { pageOrder.indexOf(it.page) },
+            { if (land) it.py else it.ly },
+            { if (land) it.px else it.lx }
+        ))
+        val occ = HashMap<Int, Array<BooleanArray>>()
+        fun grid(pg: Int) = occ.getOrPut(pg) { Array(rows) { BooleanArray(cols) } }
+        fun isFree(g: Array<BooleanArray>, x: Int, y: Int, sx: Int, sy: Int): Boolean {
+            if (x < 0 || y < 0 || x + sx > cols || y + sy > rows) return false
+            for (yy in y until y + sy) for (xx in x until x + sx) if (g[yy][xx]) return false
+            return true
+        }
+        fun mark(g: Array<BooleanArray>, x: Int, y: Int, sx: Int, sy: Int) {
+            for (yy in y until y + sy) for (xx in x until x + sx) g[yy][xx] = true
+        }
+        val todo = ArrayList<Item>()
+        for (m in sorted) {
+            if (m.x < 0 || m.y < 0) {
+                m.sx = min(max(1, if (land) m.psx else m.lsx), cols)
+                m.sy = min(max(1, if (land) m.psy else m.lsy), rows)
+                todo.add(m); changed = true; continue
+            }
+            val nsx = min(m.sx, cols)
+            val nsy = min(m.sy, rows)
+            if (nsx != m.sx || nsy != m.sy) { m.sx = nsx; m.sy = nsy; changed = true }
+            val g = grid(m.page)
+            if (!isFree(g, m.x, m.y, m.sx, m.sy)) { todo.add(m); changed = true; continue }
+            mark(g, m.x, m.y, m.sx, m.sy)
+        }
+        for (m in todo) {
+            val order = ArrayList<Int>()
+            if (pageOrder.contains(m.page)) order.add(m.page)
+            for (pg in pageOrder) if (pg != m.page) order.add(pg)
+            var placed = false
+            search@ for (pg in order) {
+                val g = grid(pg)
+                for (y in 0..rows - m.sy) for (x in 0..cols - m.sx) {
+                    if (isFree(g, x, y, m.sx, m.sy)) {
+                        m.page = pg; m.x = x; m.y = y
+                        mark(g, x, y, m.sx, m.sy)
+                        placed = true
+                        break@search
+                    }
+                }
+            }
+            if (!placed) {
+                val pg = nextPage++
+                pageOrder.add(pg)
+                m.page = pg; m.x = 0; m.y = 0
+                mark(grid(pg), 0, 0, m.sx, m.sy)
+            }
+        }
+        if (changed) save()
+        return changed
+    }
+
     fun normalize(cols: Int, rows: Int, dockCount: Int): Boolean {
         var ch = false
         for (m in ArrayList(items)) {

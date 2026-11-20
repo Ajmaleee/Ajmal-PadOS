@@ -13,7 +13,7 @@ object K {
     const val ICON_SIZE = "icon_size"; const val ICON_RADIUS = "icon_radius"; const val LABELS = "labels"
     const val LABEL_SIZE = "label_size"; const val LABEL_COLOR = "label_color"; const val LARGE_ICONS = "large_icons"; const val IOS_ICONS = "ios_icons"
     // Home
-    const val COLS = "cols"; const val ROWS = "rows"; const val HSPACE = "hspace"; const val VSPACE = "vspace"
+    const val COLS = "cols"; const val ROWS = "rows"; const val UI_SCALE = "ui_scale"; const val LCOLS = "lcols"; const val LROWS = "lrows"; const val HSPACE = "hspace"; const val VSPACE = "vspace"
     const val DOTS = "dots"; const val DOCK_VISIBLE = "dock_visible"; const val DOCK_COUNT = "dock_count"
     const val DOCK_BG = "dock_bg"; const val DOCK_GLASS = "dock_glass"; const val DOCK_ICON = "dock_icon"
     const val DOCK_MARGIN = "dock_margin"; const val SEARCH_PILL = "search_pill"
@@ -50,11 +50,11 @@ class Prefs(ctx: Context) {
     init {
         d(K.THEME, 0); d(K.PROFILE, 0); d(K.OPACITY, 55); d(K.BLUR, 45); d(K.REFRACT, 35)
         d(K.TINT, 0); d(K.EDGE, 60); d(K.SHADOW, 40); d(K.ICON_APPEARANCE, 0)
-        d(K.ICON_SIZE, 58); d(K.ICON_RADIUS, 23); d(K.LABELS, true); d(K.LABEL_SIZE, 11)
+        d(K.ICON_SIZE, 64); d(K.ICON_RADIUS, 23); d(K.LABELS, true); d(K.LABEL_SIZE, 12)
         d(K.LABEL_COLOR, 0); d(K.LARGE_ICONS, false); d(K.IOS_ICONS, true)
-        d(K.COLS, 4); d(K.ROWS, 6); d(K.HSPACE, 6); d(K.VSPACE, 6); d(K.DOTS, true)
-        d(K.DOCK_VISIBLE, true); d(K.DOCK_COUNT, 4); d(K.DOCK_BG, true); d(K.DOCK_GLASS, 70)
-        d(K.DOCK_ICON, 56); d(K.DOCK_MARGIN, 10); d(K.SEARCH_PILL, true); d(K.LOCK_LAYOUT, false)
+        d(K.COLS, 5); d(K.ROWS, 6); d(K.UI_SCALE, 0); d(K.LCOLS, 6); d(K.LROWS, 5); d(K.HSPACE, 6); d(K.VSPACE, 6); d(K.DOTS, true)
+        d(K.DOCK_VISIBLE, true); d(K.DOCK_COUNT, 5); d(K.DOCK_BG, true); d(K.DOCK_GLASS, 70)
+        d(K.DOCK_ICON, 60); d(K.DOCK_MARGIN, 10); d(K.SEARCH_PILL, true); d(K.LOCK_LAYOUT, false)
         d(K.AUTO_ADD, true)
         d(K.ANIM_SPEED, 100); d(K.SPRING, 85); d(K.REDUCE_MOTION, false); d(K.DECOR_ANIM, true)
         d(K.HAPTIC, true); d(K.ICON_ANIM, true)
@@ -66,6 +66,10 @@ class Prefs(ctx: Context) {
     }
 
     private fun d(k: String, v: Any) { defs[k] = v }
+
+    /** Grid for the active orientation (portrait and landscape keep separate layouts). */
+    fun cols(): Int = int(if (Orient.land) K.LCOLS else K.COLS)
+    fun rows(): Int = int(if (Orient.land) K.LROWS else K.ROWS)
 
     fun int(k: String): Int = sp.getInt(k, defs[k] as Int)
     fun bool(k: String): Boolean = sp.getBoolean(k, defs[k] as Boolean)
