@@ -198,6 +198,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             library?.close()
             search?.close()
             overview?.close()
+            today?.close()
             if (model.ready) applyAll()
         }
     }
@@ -268,6 +269,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         when {
             menuView != null -> dismissMenu()
             folderOverlay != null -> folderOverlay?.dismiss(true)
+            today != null -> today?.close()
             library != null -> library?.back()
             search != null -> search?.close()
             overview != null -> overview?.close()
@@ -438,7 +440,11 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         model.ensureLayout(cols, rows)
         model.normalize(cols, rows, dockCount)
         val it = viewCache.entries.iterator()
-        while (it.hasNext()) if (it.next().value !is WidgetFrame) it.remove()
+        while (it.hasNext()) {
+            val cv = it.next().value
+            // iOS-style widgets are rebuilt too, so a changed glass / theme setting applies.
+            if (cv !is WidgetFrame || (cv.childCount > 0 && cv.getChildAt(0) is IosWidgetFrame)) it.remove()
+        }
         refreshAll()
         app.glass.reload()
         library?.reload()
@@ -470,6 +476,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             }
             v.tag = m
             v.alpha = 1f
+            if (m.widgetId == IosWidgets.ID) IosWidgets.resize(v, m)
             return v
         }
         val a = if (m.type == Item.APP) (model.byKey[m.key] ?: return null) else null
@@ -750,7 +757,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
 
     fun closeOverlays() {
         folderOverlay?.dismiss(false)
-        library?.close(); search?.close(); overview?.close()
+        library?.close(); search?.close(); overview?.close(); today?.close()
     }
 
     fun openLibrary(src: View? = null) {
@@ -768,6 +775,24 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     override fun onOverscroll() {
         openLibrary()
     }
+
+    private var today: TodayView? = null
+
+    /** Today View: the widget strip that slides in over the blurred home screen. */
+    fun openToday() {
+        if (today != null || library != null) return
+        setEditing(false)
+        try {
+            today = TodayView(this).also { it.show() }
+        } catch (t: Throwable) {
+            Diag.e("openToday", t)
+            today = null
+        }
+    }
+
+    fun todayGone() { today = null }
+
+    override fun onOverscrollLeft() { openToday() }
 
     fun openSearch() {
         if (search != null) return

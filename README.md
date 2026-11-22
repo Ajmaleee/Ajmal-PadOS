@@ -62,3 +62,13 @@ Ajmal Ali A - https://github.com/Ajmaleee - https://www.instagram.com/ajmaleee__
 Source: https://github.com/Ajmaleee/Ajmal-PadOS
 
 You can always contact me to add new features, fix bugs, or submit a PR.
+
+## iOS-style widgets and Today View
+
+- **Widgets** (long-press the home screen -> Widgets): Clock, Batteries, Weather, Tablet, Calendar, each in small / medium / large (iOS proportions: 158x158, 338x158, 338x354 pt, 22 pt corners). They drag, resize and remove like any widget. Other apps' widgets are still under "Other apps' widgets".
+  - *Clock*: analog dial with a seconds hand and city initials; medium shows four cities ("Today, +5HRS"), large adds date and digital time. Choose the cities in Settings -> Widgets & Today View.
+  - *Batteries*: this tablet plus connected Bluetooth devices (earbuds, headphones, speakers, watches, keyboards...) as rings with device glyphs; red at 20% or less, yellow in power-saving mode, a bolt while charging. Bluetooth battery % only appears if the device reports it over standard Bluetooth.
+  - *Weather*: sky-coloured card with current conditions, hourly row and 7-day ranges. Data comes from Open-Meteo (no account or key). Pick a city (or "Use my location") in Settings; only that city's coordinates are sent to open-meteo.com.
+  - *Tablet*: battery, storage, memory, Android version, uptime.
+- **Today View**: swipe right on the first home page. A strip of widgets slides in over a blurred home screen (swipe left or tap outside to leave; Edit opens the settings). Choose its cards in Settings.
+- Nothing runs in the background unless a widget is on screen.

@@ -13,7 +13,7 @@ object K {
     const val ICON_SIZE = "icon_size"; const val ICON_RADIUS = "icon_radius"; const val LABELS = "labels"
     const val LABEL_SIZE = "label_size"; const val LABEL_COLOR = "label_color"; const val LARGE_ICONS = "large_icons"; const val IOS_ICONS = "ios_icons"
     // Home
-    const val COLS = "cols"; const val ROWS = "rows"; const val UI_SCALE = "ui_scale2"; const val LIB_SWIPE = "lib_swipe"; const val HIDE_NAV = "hide_nav"; const val HSPACE = "hspace"; const val VSPACE = "vspace"
+    const val COLS = "cols"; const val ROWS = "rows"; const val UI_SCALE = "ui_scale2"; const val LIB_SWIPE = "lib_swipe"; const val HIDE_NAV = "hide_nav"; const val TODAY_SWIPE = "today_swipe"; const val TD_CLOCK = "td_clock"; const val TD_WEATHER = "td_weather"; const val TD_BATT = "td_batt"; const val TD_TABLET = "td_tablet"; const val TD_CAL = "td_cal"; const val WIDGET_GLASS = "widget_glass"; const val HSPACE = "hspace"; const val VSPACE = "vspace"
     const val DOTS = "dots"; const val DOCK_VISIBLE = "dock_visible"; const val DOCK_COUNT = "dock_count"
     const val DOCK_BG = "dock_bg"; const val DOCK_GLASS = "dock_glass"; const val DOCK_ICON = "dock_icon"
     const val DOCK_MARGIN = "dock_margin"; const val SEARCH_PILL = "search_pill"
@@ -52,7 +52,7 @@ class Prefs(ctx: Context) {
         d(K.TINT, 0); d(K.EDGE, 60); d(K.SHADOW, 40); d(K.ICON_APPEARANCE, 0)
         d(K.ICON_SIZE, 64); d(K.ICON_RADIUS, 23); d(K.LABELS, true); d(K.LABEL_SIZE, 12)
         d(K.LABEL_COLOR, 0); d(K.LARGE_ICONS, false); d(K.IOS_ICONS, true)
-        d(K.COLS, 6); d(K.ROWS, 5); d(K.UI_SCALE, 100); d(K.LIB_SWIPE, true); d(K.HIDE_NAV, true); d(K.HSPACE, 6); d(K.VSPACE, 6); d(K.DOTS, true)
+        d(K.COLS, 6); d(K.ROWS, 5); d(K.UI_SCALE, 100); d(K.LIB_SWIPE, true); d(K.HIDE_NAV, true); d(K.TODAY_SWIPE, true); d(K.TD_CLOCK, true); d(K.TD_WEATHER, true); d(K.TD_BATT, true); d(K.TD_TABLET, true); d(K.TD_CAL, false); d(K.WIDGET_GLASS, false); d(K.HSPACE, 6); d(K.VSPACE, 6); d(K.DOTS, true)
         d(K.DOCK_VISIBLE, true); d(K.DOCK_COUNT, 5); d(K.DOCK_BG, true); d(K.DOCK_GLASS, 70)
         d(K.DOCK_ICON, 60); d(K.DOCK_MARGIN, 10); d(K.SEARCH_PILL, true); d(K.LOCK_LAYOUT, false)
         d(K.AUTO_ADD, true)

@@ -13,7 +13,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
-import android.view.View
 
 /**
  * Android 9 has no RenderEffect, so the backdrop is the wallpaper, down-sampled (1/8 or 1/12 screen),

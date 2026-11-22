@@ -1,6 +1,13 @@
 # AjmalPad OS checklist (Android 10 / API 29, Lenovo Tab M10 TB-X505X)
 
-Round 6 (this one)
+Round 7 (this one)
+- [x] iOS-style widgets: Clock, Batteries (this tablet + Bluetooth devices with ring and device glyphs), Weather (Open-Meteo), Tablet info, Calendar; small / medium / large
+- [x] Widget gallery (swipe through the sizes, tap to add) and live data that only runs while a widget is visible
+- [x] Today View: swipe right on the first page, widget strip over a blurred home screen, swipe left / tap outside to close, configurable cards
+- [x] Settings: weather city search / use my location, temperature unit, world-clock cities, Today View cards, glass widgets
+- [ ] Not built: calendar events (needs the calendar permission), separate left/right earbud and case levels (needs vendor-specific Bluetooth protocols)
+
+Round 6
 - [x] Dock icons could not be moved and sat above the dock: an earlier build saved y = -1 for dock items, drawing them one row above the dock, outside its touch area. Fixed at load, on save and when dropping; the cell layout also clamps positions
 - [x] App Library closes when you swipe right
 - [x] Settings: genie animation speed (tap the preview to try it)

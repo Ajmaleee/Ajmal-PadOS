@@ -13,6 +13,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import java.util.TimeZone
 import android.os.Debug
 import android.provider.Settings
 import android.view.View
@@ -257,6 +258,27 @@ class SettingsActivity : Activity() {
         toggle("FPS and memory overlay", K.FPS)
         action("Memory diagnostics", null) { showMemory() }
 
+        header("Widgets & Today View")
+        toggle("Swipe right on the first page opens Today View", K.TODAY_SWIPE, "Like iPadOS: a strip of widgets slides in over a blurred home screen")
+        toggle("Today View: Clock", K.TD_CLOCK)
+        toggle("Today View: Weather", K.TD_WEATHER)
+        toggle("Today View: Batteries (Bluetooth devices)", K.TD_BATT)
+        toggle("Today View: Tablet info", K.TD_TABLET)
+        toggle("Today View: Calendar", K.TD_CAL)
+        toggle("Glass widgets (iOS 26 style)", K.WIDGET_GLASS, "Translucent glass cards instead of solid iOS 14-17 cards. Weather keeps its sky")
+        action("Weather location", WCfg.place()?.label ?: "Not set. Tap to search for a city") { pickWeatherLocation() }
+        action("Temperature unit", when (WCfg.unit()) { "C" -> "Celsius"; "F" -> "Fahrenheit"; else -> "Automatic (from your region)" }) {
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Temperature unit")
+                .setItems(arrayOf("Automatic", "Celsius", "Fahrenheit")) { _, i ->
+                    WCfg.setUnit(when (i) { 1 -> "C"; 2 -> "F"; else -> "auto" })
+                    recreate()
+                }.show()
+        }
+        val zones = WCfg.zones()
+        for (slot in 1..3) action("World clock: city $slot", WCfg.cityName(zones[slot])) { pickZone(slot) }
+        action("Bluetooth devices", "Connected devices appear in the Batteries widget. A battery percentage shows only if the device reports it over Bluetooth. The weather widget sends your chosen city's coordinates to open-meteo.com") { }
+
         header("Hidden apps")
         action("Hidden apps password", if (Vault.isSet(this)) "A password is set. Tap to change or remove it" else "Not set yet. Hidden apps open only with a password") {
             if (!Vault.isSet(this)) VaultUi.create(this) { recreate() }
@@ -318,6 +340,122 @@ class SettingsActivity : Activity() {
         action("Source code", "github.com/Ajmaleee/Ajmal-PadOS") { openUrl("https://github.com/Ajmaleee/Ajmal-PadOS") }
         val note = rowBase()
         note.addView(label(this, "You can always contact me to add new features, fix bugs, or submit a PR.", 14f, fg))
+    }
+
+    private fun listDialog(title: String, hint: String, onPick: (Int) -> Unit, source: (String) -> List<String>, extra: (() -> Unit)?, extraLabel: String, positive: String? = null): AlertDialog {
+        val dp = resources.displayMetrics.density
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding((20 * dp).toInt(), (8 * dp).toInt(), (20 * dp).toInt(), 0)
+        val q = android.widget.EditText(this)
+        q.hint = hint
+        q.setSingleLine(true)
+        q.setTextColor(Color.WHITE)
+        q.setHintTextColor(0xFF8E8E93.toInt())
+        val labels = ArrayList<String>()
+        val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
+        val lv = android.widget.ListView(this)
+        lv.adapter = adapter
+        box.addView(q)
+        box.addView(lv, LinearLayout.LayoutParams(-1, (240 * dp).toInt()))
+        val b = AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert).setTitle(title).setView(box)
+            .setNegativeButton("Close", null)
+        if (positive != null) b.setPositiveButton(positive, null)
+        if (extra != null) b.setNeutralButton(extraLabel) { _, _ -> extra() }
+        val dlg = b.create()
+        fun fill(items: List<String>) { labels.clear(); labels.addAll(items); adapter.notifyDataSetChanged() }
+        q.addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(s: android.text.Editable?) { fill(source(s?.toString() ?: "")) }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        lv.setOnItemClickListener { _, _, i, _ -> dlg.dismiss(); onPick(i) }
+        fill(source(""))
+        dlg.show()
+        return dlg
+    }
+
+    private fun pickZone(slot: Int) {
+        val all = TimeZone.getAvailableIDs().filter { it.contains('/') && !it.startsWith("Etc/") && !it.startsWith("SystemV/") }.sorted()
+        var shown: List<String> = all
+        listDialog("World clock: city $slot", "Search a city or region",
+            { i -> shown.getOrNull(i)?.let { WCfg.setZone(slot, it); recreate() } },
+            { t ->
+                val k = t.trim().lowercase().replace(' ', '_')
+                shown = if (k.isEmpty()) all else all.filter { it.lowercase().contains(k) }
+                shown.take(80).map { it.replace('_', ' ') }
+            }, null, "")
+    }
+
+    private fun pickWeatherLocation() {
+        var results: List<Place> = emptyList()
+        val labelsOut = ArrayList<String>()
+        val dlg = listDialog("Weather location", "City name (then tap Search)",
+            { i -> results.getOrNull(i)?.let { p -> WCfg.setPlace(p); WidgetData.refreshWeather(true); toast("Weather location: ${p.name}"); recreate() } },
+            { _ -> labelsOut }, { useMyLocation() }, "Use my location", "Search")
+        // The list shows search results; the Search button runs the lookup (and keeps the dialog open).
+        dlg.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+            val box = dlg.window?.decorView as? android.view.ViewGroup
+            val q = findEdit(box)
+            val t = q?.text?.toString()?.trim() ?: ""
+            if (t.length < 2) return@setOnClickListener
+            WidgetData.searchCity(t) { res ->
+                if (res == null) toast("Search failed. Check the internet connection")
+                else {
+                    results = res
+                    labelsOut.clear(); labelsOut.addAll(res.map { it.label })
+                    findList(box)?.let { lv -> (lv.adapter as? android.widget.ArrayAdapter<*>)?.let { ad ->
+                        @Suppress("UNCHECKED_CAST") val a = ad as android.widget.ArrayAdapter<String>
+                        a.clear(); a.addAll(labelsOut); a.notifyDataSetChanged() } }
+                    if (res.isEmpty()) toast("No matches")
+                }
+            }
+        }
+    }
+
+    private fun findEdit(v: android.view.View?): android.widget.EditText? {
+        if (v is android.widget.EditText) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findEdit(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    private fun findList(v: android.view.View?): android.widget.ListView? {
+        if (v is android.widget.ListView) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findList(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    private fun useMyLocation() {
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 8)
+            return
+        }
+        Thread {
+            var loc: android.location.Location? = null
+            try {
+                val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+                for (pv in listOf(android.location.LocationManager.NETWORK_PROVIDER, android.location.LocationManager.PASSIVE_PROVIDER, android.location.LocationManager.GPS_PROVIDER)) {
+                    loc = try { lm.getLastKnownLocation(pv) } catch (t: SecurityException) { null }
+                    if (loc != null) break
+                }
+            } catch (t: Throwable) { Diag.e("settings.location", t) }
+            val l = loc
+            var name = "My location"
+            if (l != null) try {
+                val a = android.location.Geocoder(this).getFromLocation(l.latitude, l.longitude, 1)?.firstOrNull()
+                val n = a?.locality ?: a?.subAdminArea
+                if (!n.isNullOrBlank()) name = n
+            } catch (t: Throwable) { }
+            runOnUiThread {
+                if (l == null) toast("No location available yet. Open a maps app once, then try again.")
+                else {
+                    WCfg.setPlace(Place(name, l.latitude, l.longitude, true))
+                    WidgetData.refreshWeather(true)
+                    toast("Weather location: $name")
+                    recreate()
+                }
+            }
+        }.start()
     }
 
     private fun openUrl(u: String) {
@@ -436,6 +574,7 @@ class SettingsActivity : Activity() {
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(code, perms, results)
         if (code == 7) LauncherApp.get().glass.reload()
+        if (code == 8 && results.isNotEmpty() && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) useMyLocation()
     }
 
     companion object {

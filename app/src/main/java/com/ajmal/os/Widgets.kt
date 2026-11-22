@@ -27,7 +27,7 @@ class WidgetManager(private val act: HomeActivity) {
 
     fun start() { try { host.startListening() } catch (t: Throwable) { } }
     fun stop() { try { host.stopListening() } catch (t: Throwable) { } }
-    fun delete(id: Int) { try { host.deleteAppWidgetId(id) } catch (t: Throwable) { } }
+    fun delete(id: Int) { if (id < 0) return; try { host.deleteAppWidgetId(id) } catch (t: Throwable) { } }
 
     /** A stand-in for a widget that cannot be shown right now. The widget is kept, not deleted. */
     private fun placeholder(item: Item, text: String): View {
@@ -45,6 +45,9 @@ class WidgetManager(private val act: HomeActivity) {
      * updating, a broken widget, or Safe mode all show a placeholder instead of crashing or losing the widget.
      */
     fun createView(item: Item): View? {
+        if (item.widgetId == IosWidgets.ID) {   // built-in iOS-style widget
+            return guard<View?>("ios.widget", null) { IosWidgets.create(act, item) } ?: placeholder(item, "Widget failed to load")
+        }
         if (Safe.mode) return placeholder(item, "Widgets are paused in safe mode")
         val info = try { mgr.getAppWidgetInfo(item.widgetId) } catch (t: Throwable) { Diag.e("widget.info", t); null }
         if (info == null) {
@@ -65,7 +68,28 @@ class WidgetManager(private val act: HomeActivity) {
         }
     }
 
-    fun showPicker() {
+    /** The widget gallery: iOS-style widgets first, with a button for other apps' widgets. */
+    fun showPicker() { guardRun("widget.gallery") { IosWidgetGallery.show(act) } }
+
+    fun addIos(kind: String, size: IosWidgets.Size) {
+        guardRun("widget.addIos") {
+            val sp = IosWidgets.spans(size)
+            val m = act.model.newItem(Item.WIDGET)
+            m.widgetId = IosWidgets.ID
+            m.pkg = IosWidgets.PKG
+            m.cls = kind
+            m.sx = min(act.cols, sp.first)
+            m.sy = min(act.rows, sp.second)
+            act.model.placeAnywhere(m, act.cols, act.rows, act.currentPageId())
+            act.model.items.add(m)
+            act.model.save()
+            act.refreshAll()
+            act.goToPageId(m.page)
+            Toast.makeText(act, "Widget added", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun showAndroidPicker() {
         if (act.isFinishing) return
         val list = try { ArrayList<AppWidgetProviderInfo>(mgr.installedProviders) } catch (t: Throwable) {
             Diag.e("widget.providers", t)

@@ -68,7 +68,8 @@ class PullLayout(
     ctx: Context, private val dir: Int,
     private val atEdge: () -> Boolean, private val onDismiss: () -> Boolean,
     private val onSwipeRight: (() -> Boolean)? = null,
-    private val onTap: (() -> Unit)? = null
+    private val onTap: (() -> Unit)? = null,
+    private val onSwipeLeft: (() -> Boolean)? = null
 ) : FrameLayout(ctx) {
     private val dp = ctx.resources.displayMetrics.density
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
@@ -79,6 +80,7 @@ class PullLayout(
     private var edgeAtDown = false
     private var pulling = false
     private var horizontal = false
+    private var hsign = 1
     private var tapOk = false
     private var vt: VelocityTracker? = null
 
@@ -89,14 +91,15 @@ class PullLayout(
     }
 
     private fun wantsHorizontal(e: MotionEvent): Boolean {
-        if (onSwipeRight == null) return false
         val d = e.rawX - downX
-        return d > slop && d > abs(e.rawY - downY) * 1.3f
+        val vert = abs(e.rawY - downY) * 1.3f
+        return (onSwipeRight != null && d > slop && d > vert) || (onSwipeLeft != null && -d > slop && -d > vert)
     }
 
     private fun startPull(e: MotionEvent, horiz: Boolean) {
         pulling = true
         horizontal = horiz
+        if (horiz) hsign = if (e.rawX - downX >= 0f) 1 else -1
         downX = e.rawX; downY = e.rawY
         lastX = e.rawX; lastY = e.rawY
         vt?.recycle()
@@ -133,8 +136,8 @@ class PullLayout(
                 vt?.addMovement(e)
                 lastX = e.rawX; lastY = e.rawY
                 if (horizontal) {
-                    val d = (e.rawX - downX).coerceAtLeast(0f)
-                    translationX = d * 0.5f
+                    val d = ((e.rawX - downX) * hsign).coerceAtLeast(0f)
+                    translationX = d * 0.5f * hsign
                     alpha = (1f - d / (420f * dp)).coerceIn(0.35f, 1f)
                 } else {
                     val d = ((e.rawY - downY) * dir).coerceAtLeast(0f)
@@ -148,14 +151,14 @@ class PullLayout(
                     var v = 0f
                     vt?.let {
                         it.computeCurrentVelocity(1000)
-                        v = if (horizontal) it.xVelocity else it.yVelocity * dir
+                        v = if (horizontal) it.xVelocity * hsign else it.yVelocity * dir
                         it.recycle()
                     }
                     vt = null
                     val up = e.actionMasked == MotionEvent.ACTION_UP
                     val handled = if (horizontal) {
-                        val d = (lastX - downX).coerceAtLeast(0f)
-                        up && (d > 100f * dp || v > 1300f) && (onSwipeRight?.invoke() == true)
+                        val d = ((lastX - downX) * hsign).coerceAtLeast(0f)
+                        up && (d > 100f * dp || v > 1300f) && ((if (hsign > 0) onSwipeRight?.invoke() else onSwipeLeft?.invoke()) == true)
                     } else {
                         val d = ((lastY - downY) * dir).coerceAtLeast(0f)
                         up && (d > 90f * dp || v > 1400f) && onDismiss()

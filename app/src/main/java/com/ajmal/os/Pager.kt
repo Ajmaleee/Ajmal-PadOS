@@ -20,6 +20,7 @@ interface PagerCallbacks {
     fun onLongPressEmpty(x: Float, y: Float)
     fun onPinchIn()
     fun onOverscroll()
+    fun onOverscrollLeft()
 }
 
 /**
@@ -231,6 +232,11 @@ class HomePager(ctx: Context, private val cb: PagerCallbacks) : ViewGroup(ctx) {
         val w = width.toFloat()
         if (w <= 0f) return
         val maxPos = (pages.size - 1) * w
+        if (pages.isNotEmpty() && index == 0 && prefs.bool(K.TODAY_SWIPE) && (pos < -56f * dp || (pos < 8f && vx > 1300f))) {
+            goTo(0, 0f)
+            cb.onOverscrollLeft()
+            return
+        }
         if (pages.isNotEmpty() && prefs.bool(K.LIB_SWIPE) && (pos > maxPos + 64f * dp || (pos > maxPos - 6f && vx < -1100f))) {
             goTo(pages.size - 1, 0f)
             cb.onOverscroll()
