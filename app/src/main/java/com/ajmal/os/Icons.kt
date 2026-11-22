@@ -93,11 +93,17 @@ class IconCache(private val ctx: Context) {
         l.add(cb)
         waiters[key] = l
         exec.execute {
-            val b = try { renderHq(a, size) } catch (t: Throwable) { fallback(size) }
+            val b = try { renderHq(a, size) } catch (t: Throwable) {
+                if (t is OutOfMemoryError) cache.evictAll()
+                Diag.e("icons.render", t)
+                try { fallback(size) } catch (t2: Throwable) { Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888) }
+            }
             main.post {
-                cache.put(key, b)
-                val w = waiters.remove(key)
-                if (w != null) for (r in w) r()
+                guardRun("icons.deliver") {
+                    cache.put(key, b)
+                    val w = waiters.remove(key)
+                    if (w != null) for (r in w) guardRun("icons.callback") { r() }
+                }
             }
         }
     }
@@ -293,10 +299,26 @@ class IconCache(private val ctx: Context) {
 
     fun loadStamps() {
         val m = HashMap<String, Long>()
-        dir.listFiles()?.forEach {
-            if (it.name.endsWith(".png")) m[it.name.removeSuffix(".png")] = it.lastModified()
-        }
+        try {
+            dir.listFiles()?.forEach {
+                if (it.name.endsWith(".png")) m[it.name.removeSuffix(".png")] = it.lastModified()
+            }
+        } catch (t: Throwable) { Diag.e("icons.stamps", t) }
         stamps = m
+    }
+
+    private fun readLimited(s: java.io.InputStream, max: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val n = s.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > max) throw java.io.IOException("file too large")
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
     }
 
     private fun decodeSquare(bytes: ByteArray): Bitmap? {
@@ -321,12 +343,12 @@ class IconCache(private val ctx: Context) {
     fun importCustom(uri: Uri, pkg: String, done: (Boolean) -> Unit) {
         exec.execute {
             val ok = try {
-                val bytes = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                val bytes = (ctx.contentResolver.openInputStream(uri) ?: throw java.io.IOException("cannot open")).use { readLimited(it, 8_000_000) }
                 val b = decodeSquare(bytes)
                 if (b != null) { saveBitmap(b, pkg); true } else false
             } catch (t: Throwable) { false }
             if (ok) loadStamps()
-            main.post { done(ok) }
+            main.post { guardRun("icons.importCustom") { done(ok) } }
         }
     }
 
@@ -334,21 +356,26 @@ class IconCache(private val ctx: Context) {
     fun importPack(uri: Uri, done: (Int) -> Unit) {
         exec.execute {
             var n = 0
+            var seen = 0
             try {
-                ZipInputStream(ctx.contentResolver.openInputStream(uri)).use { z ->
+                ZipInputStream(ctx.contentResolver.openInputStream(uri) ?: throw java.io.IOException("cannot open")).use { z ->
                     var e = z.nextEntry
-                    while (e != null) {
+                    while (e != null && seen < 3000) {
+                        seen++
                         val name = e.name.substringAfterLast('/')
-                        if (!e.isDirectory && name.endsWith(".png", true) && name.length > 4) {
-                            val b = decodeSquare(z.readBytes())
-                            if (b != null) { saveBitmap(b, name.dropLast(4)); n++ }
+                        // Plain package-style names only; one bad or oversized entry never aborts the pack.
+                        if (!e.isDirectory && Regex("[A-Za-z0-9._]{1,200}\\.png", RegexOption.IGNORE_CASE).matches(name)) {
+                            try {
+                                val b = decodeSquare(readLimited(z, 4_000_000))
+                                if (b != null) { saveBitmap(b, name.dropLast(4)); n++ }
+                            } catch (t: Throwable) { Diag.e("icons.pack.entry", t) }
                         }
                         e = z.nextEntry
                     }
                 }
-            } catch (t: Throwable) { }
+            } catch (t: Throwable) { Diag.e("icons.importPack", t) }
             loadStamps()
-            main.post { done(n) }
+            main.post { guardRun("icons.importPack.done") { done(n) } }
         }
     }
 

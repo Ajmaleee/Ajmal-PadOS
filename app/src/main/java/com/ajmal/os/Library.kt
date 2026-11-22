@@ -66,60 +66,104 @@ class OverlayAnim(
  */
 class PullLayout(
     ctx: Context, private val dir: Int,
-    private val atEdge: () -> Boolean, private val onDismiss: () -> Boolean
+    private val atEdge: () -> Boolean, private val onDismiss: () -> Boolean,
+    private val onSwipeRight: (() -> Boolean)? = null,
+    private val onTap: (() -> Unit)? = null
 ) : FrameLayout(ctx) {
     private val dp = ctx.resources.displayMetrics.density
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
     private var downX = 0f
     private var downY = 0f
+    private var lastX = 0f
     private var lastY = 0f
     private var edgeAtDown = false
     private var pulling = false
+    private var horizontal = false
+    private var tapOk = false
     private var vt: VelocityTracker? = null
 
-    private fun wantsPull(e: MotionEvent): Boolean {
+    private fun wantsVertical(e: MotionEvent): Boolean {
         if (!edgeAtDown) return false
         val d = (e.rawY - downY) * dir
         return d > slop && d > abs(e.rawX - downX) * 1.3f
     }
 
-    private fun startPull(e: MotionEvent) {
+    private fun wantsHorizontal(e: MotionEvent): Boolean {
+        if (onSwipeRight == null) return false
+        val d = e.rawX - downX
+        return d > slop && d > abs(e.rawY - downY) * 1.3f
+    }
+
+    private fun startPull(e: MotionEvent, horiz: Boolean) {
         pulling = true
-        downY = e.rawY
-        lastY = e.rawY
+        horizontal = horiz
+        downX = e.rawX; downY = e.rawY
+        lastX = e.rawX; lastY = e.rawY
         vt?.recycle()
         vt = VelocityTracker.obtain()
         vt?.addMovement(e)
         parent?.requestDisallowInterceptTouchEvent(true)
     }
 
+    private fun reset() { animate().translationX(0f).translationY(0f).alpha(1f).setDuration(180).start() }
+
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { downX = e.rawX; downY = e.rawY; edgeAtDown = atEdge(); pulling = false }
-            MotionEvent.ACTION_MOVE -> if (!pulling && wantsPull(e)) { startPull(e); return true }
+            MotionEvent.ACTION_MOVE -> if (!pulling) {
+                if (wantsVertical(e)) { startPull(e, false); return true }
+                if (wantsHorizontal(e)) { startPull(e, true); return true }
+            }
         }
         return false
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = e.rawX; downY = e.rawY; edgeAtDown = atEdge(); pulling = false }
-            MotionEvent.ACTION_MOVE -> {
-                if (!pulling) { if (wantsPull(e)) startPull(e) else return true }
-                vt?.addMovement(e)
-                lastY = e.rawY
-                val d = ((e.rawY - downY) * dir).coerceAtLeast(0f)
-                translationY = d * 0.5f * dir
-                alpha = (1f - d / (420f * dp)).coerceIn(0.35f, 1f)
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.rawX; downY = e.rawY; edgeAtDown = atEdge(); pulling = false; tapOk = true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (pulling) {
-                pulling = false
-                val d = ((lastY - downY) * dir).coerceAtLeast(0f)
-                var v = 0f
-                vt?.let { it.computeCurrentVelocity(1000); v = it.yVelocity * dir; it.recycle() }
-                vt = null
-                val go = e.actionMasked == MotionEvent.ACTION_UP && (d > 90f * dp || v > 1400f)
-                if (!(go && onDismiss())) animate().translationY(0f).alpha(1f).setDuration(180).start()
+            MotionEvent.ACTION_MOVE -> {
+                if (!pulling) {
+                    if (abs(e.rawX - downX) > slop || abs(e.rawY - downY) > slop) tapOk = false
+                    if (wantsVertical(e)) startPull(e, false)
+                    else if (wantsHorizontal(e)) startPull(e, true)
+                    else return true
+                }
+                vt?.addMovement(e)
+                lastX = e.rawX; lastY = e.rawY
+                if (horizontal) {
+                    val d = (e.rawX - downX).coerceAtLeast(0f)
+                    translationX = d * 0.5f
+                    alpha = (1f - d / (420f * dp)).coerceIn(0.35f, 1f)
+                } else {
+                    val d = ((e.rawY - downY) * dir).coerceAtLeast(0f)
+                    translationY = d * 0.5f * dir
+                    alpha = (1f - d / (420f * dp)).coerceIn(0.35f, 1f)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (pulling) {
+                    pulling = false
+                    var v = 0f
+                    vt?.let {
+                        it.computeCurrentVelocity(1000)
+                        v = if (horizontal) it.xVelocity else it.yVelocity * dir
+                        it.recycle()
+                    }
+                    vt = null
+                    val up = e.actionMasked == MotionEvent.ACTION_UP
+                    val handled = if (horizontal) {
+                        val d = (lastX - downX).coerceAtLeast(0f)
+                        up && (d > 100f * dp || v > 1300f) && (onSwipeRight?.invoke() == true)
+                    } else {
+                        val d = ((lastY - downY) * dir).coerceAtLeast(0f)
+                        up && (d > 90f * dp || v > 1400f) && onDismiss()
+                    }
+                    if (!handled) reset()
+                } else if (e.actionMasked == MotionEvent.ACTION_UP && tapOk) {
+                    onTap?.invoke()
+                }
             }
         }
         return true
@@ -310,7 +354,8 @@ internal class IconSource(private val v: View) {
 class CategoryCardView(
     ctx: Context, private val h: HomeActivity, private val title: String,
     private val apps: List<AppInfo>, private val cardPx: Int,
-    private val onOpen: () -> Unit, private val onLaunched: () -> Unit
+    private val onOpen: () -> Unit, private val onLaunched: () -> Unit,
+    private val locked: Boolean = false
 ) : View(ctx) {
     private val app = LauncherApp.get()
     private val dp = ctx.resources.displayMetrics.density
@@ -341,7 +386,7 @@ class CategoryCardView(
         }
     }
 
-    private fun appAt(s: Int): AppInfo? = when {
+    private fun appAt(s: Int): AppInfo? = if (locked) null else when {
         s in 0..2 -> apps.getOrNull(s)
         s == 3 && bigOnly -> apps.getOrNull(3)
         else -> null
@@ -370,6 +415,27 @@ class CategoryCardView(
         c.drawBitmap(b, x + (box - size) / 2f - pd, y + (box - size) / 2f - pd, bp)
     }
 
+    /** A padlock instead of icons: the card never reveals which apps are hidden. */
+    private fun drawLock(c: Canvas, fg: Int) {
+        val cx = cardPx / 2f
+        val bw = cardPx * 0.30f
+        val bh = cardPx * 0.22f
+        val top = cardPx / 2f - bh / 2f + cardPx * 0.06f
+        bg.style = Paint.Style.FILL
+        bg.color = (fg and 0x00FFFFFF) or (0xD0 shl 24)
+        rf.set(cx - bw / 2f, top, cx + bw / 2f, top + bh)
+        c.drawRoundRect(rf, bw * 0.14f, bw * 0.14f, bg)
+        bg.style = Paint.Style.STROKE
+        bg.strokeWidth = cardPx * 0.045f
+        bg.strokeCap = Paint.Cap.ROUND
+        val sw = bw * 0.62f
+        rf.set(cx - sw / 2f, top - bh * 0.95f, cx + sw / 2f, top + bh * 0.2f)
+        c.drawArc(rf, 180f, 180f, false, bg)
+        c.drawLine(cx - sw / 2f, top - bh * 0.37f, cx - sw / 2f, top + 2f, bg)
+        c.drawLine(cx + sw / 2f, top - bh * 0.37f, cx + sw / 2f, top + 2f, bg)
+        bg.style = Paint.Style.FILL
+    }
+
     override fun onDraw(c: Canvas) {
         val dark = app.isDark()
         val fg = if (dark) Color.WHITE else 0xFF1C1C1E.toInt()
@@ -385,11 +451,12 @@ class CategoryCardView(
         c.drawPath(Squircle.path(rf, r, path), bg)
 
         val big = if (bigOnly) 4 else 3
-        for (i in 0 until big) {
+        if (locked) drawLock(c, fg)
+        else for (i in 0 until big) {
             val a = apps.getOrNull(i) ?: break
             drawIcon(c, a, slotX(i), slotY(i), slot, if (pressedSlot == i) 150 else 255)
         }
-        if (!bigOnly) {
+        if (!bigOnly && !locked) {
             val g2 = gap * 0.55f
             val mini = (slot - g2) / 2f
             val x0 = slotX(3); val y0 = slotY(3)
@@ -522,7 +589,7 @@ class AppGridView(
     }
 }
 
-private class Group(val title: String, val display: List<AppInfo>, val all: List<AppInfo>)
+private class Group(val title: String, val display: List<AppInfo>, val all: List<AppInfo>, val locked: Boolean = false)
 
 /**
  * App Library in the style of iOS: search bar on top, a 2-column grid of category cards. Tapping the
@@ -543,7 +610,8 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
     private val pull = PullLayout(
         h, 1,
         { if (searching) !list.canScrollVertically(-1) else !scroll.canScrollVertically(-1) },
-        { if (searching) { exitSearch(); false } else { close(); true } }
+        { if (searching) { exitSearch(); false } else { close(); true } },
+        { close(); true }   // swipe right: back to the home screen
     )
     private var closing = false
     private var genie: GenieView? = null
@@ -611,7 +679,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         buildGrid()
     }
 
-    private fun dur(ms: Long): Long = (ms * 100f / h.prefs.int(K.ANIM_SPEED).coerceAtLeast(30)).toLong()
+    private fun dur(ms: Long): Long = (ms * 100f / h.prefs.int(K.GENIE_SPEED).coerceAtLeast(20)).toLong()
 
     private fun srcRect(): RectF {
         val v = srcView
@@ -654,7 +722,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
 
     private fun genieOpen() {
         if (closing) return
-        val bmp = if (h.prefs.bool(K.REDUCE_MOTION)) null else snapshot()
+        val bmp = if (h.prefs.bool(K.REDUCE_MOTION) || Safe.mode) null else snapshot()
         if (bmp == null) {
             view.alpha = 0f
             view.visibility = View.VISIBLE
@@ -694,7 +762,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
             running.animateTo(0f, dur(300)) { finishClose() }
             return
         }
-        val bmp = if (h.prefs.bool(K.REDUCE_MOTION)) null else snapshot()
+        val bmp = if (h.prefs.bool(K.REDUCE_MOTION) || Safe.mode) null else snapshot()
         if (bmp == null) {
             view.animate().alpha(0f).setDuration(140).withEndAction { finishClose() }.start()
             return
@@ -749,7 +817,8 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
 
     private fun rebuildList() {
         val q = query.trim().lowercase()
-        val all = h.model.apps
+        val hidden = h.model.hiddenApps
+        val all = h.model.apps.filter { !hidden.contains(it.key) }   // Hidden apps never show up in the list
         adapter.set(sectionRows(if (q.isEmpty()) all else all.filter { it.matches(q) }), true)
     }
 
@@ -770,7 +839,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
             if (l.isNotEmpty()) groups.add(Group(cat, l, l.sortedBy { it.lower }))
         }
         val hid = m.apps.filter { hidden.contains(it.key) }
-        if (hid.isNotEmpty()) groups.add(Group("Hidden", hid.sortedWith(byUse), hid))
+        if (hid.isNotEmpty()) groups.add(Group("Hidden", emptyList(), hid.sortedBy { it.lower }, true))
 
         val gap = h.dpi(14)
         val avail = min(h.screenW, h.dpi(980)) - h.dpi(32)
@@ -780,7 +849,8 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
             val row = LinearLayout(h)
             row.orientation = LinearLayout.HORIZONTAL
             for ((i, g) in pair.withIndex()) {
-                val card = CategoryCardView(h, h, g.title, g.display, cw, { openSheet(g.title, g.all) }, { close() })
+                val onOpen: () -> Unit = if (g.locked) ({ VaultUi.unlock(h) { openSheet(g.title, g.all) } }) else ({ openSheet(g.title, g.all) })
+                val card = CategoryCardView(h, h, g.title, g.display, cw, onOpen, { close() }, g.locked)
                 val lp = LinearLayout.LayoutParams(cw, -2)
                 if (i < n - 1) lp.rightMargin = gap
                 row.addView(card, lp)
@@ -842,7 +912,7 @@ class SearchOverlay(private val h: HomeActivity) {
     private val list = ListView(h)
     private val adapter = RowAdapter(h)
     private var query = ""
-    private val pull = PullLayout(h, -1, { !list.canScrollVertically(1) }, { close(); true })
+    private val pull = PullLayout(h, -1, { !list.canScrollVertically(1) }, { close(); true }, null, { close() })
     private val anim = OverlayAnim(view, -h.dpf(40f), h.overlayLayer) { h.searchGone() }
 
     init {
@@ -863,6 +933,22 @@ class SearchOverlay(private val h: HomeActivity) {
         content.addView(head)
         styleList(list)
         list.adapter = adapter
+        // A tap on the blank part of the list (below the results) goes back to the home screen.
+        val tapSlop = ViewConfiguration.get(h).scaledTouchSlop
+        list.setOnTouchListener(object : View.OnTouchListener {
+            private var dx = 0f
+            private var dy = 0f
+            override fun onTouch(v: View, e: MotionEvent): Boolean {
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { dx = e.x; dy = e.y }
+                    MotionEvent.ACTION_UP -> if (abs(e.x - dx) < tapSlop && abs(e.y - dy) < tapSlop &&
+                        list.pointToPosition(e.x.toInt(), e.y.toInt()) == android.widget.AdapterView.INVALID_POSITION) {
+                        v.post { close() }
+                    }
+                }
+                return false
+            }
+        })
         content.addView(list, LinearLayout.LayoutParams(-1, 0, 1f).also { it.topMargin = h.dpi(8) })
         pull.addView(content, FrameLayout.LayoutParams(min(h.screenW, h.dpi(640)), -1, Gravity.CENTER_HORIZONTAL))
         view.addView(pull, FrameLayout.LayoutParams(-1, -1))
@@ -917,8 +1003,9 @@ class SearchOverlay(private val h: HomeActivity) {
         val m = h.model
         val q = query.trim().lowercase()
         val out = ArrayList<Row>()
+        val hiddenSet = m.hiddenApps
         if (q.isEmpty()) {
-            val fr = m.frequent().take(6)
+            val fr = m.frequent().filter { !hiddenSet.contains(it.key) }.take(6)
             if (fr.isNotEmpty()) {
                 out.add(Row(0, "SUGGESTIONS", null))
                 for (a in fr) out.add(Row(1, a.label, a))
@@ -928,7 +1015,7 @@ class SearchOverlay(private val h: HomeActivity) {
                 for (s in m.searches) out.add(Row(2, s, null))
             }
         } else {
-            val hits = m.apps.filter { it.matches(q) }
+            val hits = m.apps.filter { !hiddenSet.contains(it.key) && it.matches(q) }
                 .sortedWith(compareBy<AppInfo>({ if (it.lower.startsWith(q)) 0 else 1 }, { -(m.usage[it.key] ?: 0) }, { it.lower }))
             for (a in hits.take(60)) out.add(Row(1, a.label, a))
         }

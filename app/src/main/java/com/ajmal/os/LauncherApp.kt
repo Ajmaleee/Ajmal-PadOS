@@ -14,6 +14,7 @@ class LauncherApp : Application() {
     override fun onCreate() {
         super.onCreate()
         inst = this
+        Diag.install(this)   // crash recorder + safe mode, before anything else can fail
         prefs = Prefs(this)
         IosIcons.on = prefs.bool(K.IOS_ICONS)
         icons = IconCache(this)

@@ -128,6 +128,7 @@ object IosIcons {
 
         val now = Calendar.getInstance()
         for (sh in sp.shapes) {
+          try {
             if ((sh.vis and visBit) == 0) continue
             val base = if (mono || sh.col == INK) ink else sh.col
             val alpha = (Color.alpha(base) * (if (mono) sh.ma else 1f)).toInt().coerceIn(0, 255)
@@ -164,6 +165,7 @@ object IosIcons {
                     c.drawText(s, sh.x, sh.y, p)
                 }
             }
+          } catch (t: Throwable) { Diag.e("ios.shape", t) }
         }
         c.restore()
     }

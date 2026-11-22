@@ -20,7 +20,9 @@ import kotlin.math.sqrt
  * BitmapShader (Ultra Lite) or a small pre-refracted bitmap (Balanced / Ultra Glass). No GL thread,
  * no continuous rendering: panels only redraw when something invalidates them.
  */
-class GlassRenderer(private val app: LauncherApp) {
+class GlassRenderer(private val app: LauncherApp, private val preview: Boolean = false) {
+    private var sceneBmp: Bitmap? = null
+    private var refW = 1280
     @Volatile var blurred: Bitmap? = null
     @Volatile var blurPix: IntArray? = null
     /** Much stronger blur used behind full-screen overlays (App Library, Search, Folders, Overview). */
@@ -46,6 +48,17 @@ class GlassRenderer(private val app: LauncherApp) {
         screenW = dm.widthPixels
         screenH = dm.heightPixels
     }
+
+    /** Settings preview: blur a synthetic scene instead of the wallpaper (realWidth = real screen width, for blur scale). */
+    fun setScene(b: Bitmap, realWidth: Int) {
+        sceneBmp = b
+        screenW = b.width
+        screenH = b.height
+        refW = max(1, realWidth)
+        reload()
+    }
+
+    fun release() { try { exec.shutdown() } catch (t: Throwable) { } }
 
     /** Called when the launcher rotates; the wallpaper backdrop is rebuilt for the new shape. */
     fun setScreen(w: Int, h: Int) {
@@ -73,12 +86,15 @@ class GlassRenderer(private val app: LauncherApp) {
     fun reload() {
         val p = app.prefs
         wpId = currentWpId()
-        if (!p.bool(K.WP_BLUR)) {
+        if (exec.isShutdown) return
+        if (!preview && (!p.bool(K.WP_BLUR) || Safe.mode)) {
             blurred = null; blurPix = null; heavy = null; gen++; notifyAll2()
             return
         }
         val reduced = p.bool(K.REDUCED_BLUR)
-        val sc = if (reduced) 12 else 8
+        val sc0 = if (reduced) 12 else 8
+        val sc = if (preview) max(2, (sc0 * screenW / refW.toFloat()).roundToInt()) else sc0
+        val scene = sceneBmp
         val rad = max(1, (p.int(K.BLUR) / 100f * (if (reduced) 3f else 8f)).roundToInt())
         val sw = screenW
         val sh = screenH
@@ -89,8 +105,12 @@ class GlassRenderer(private val app: LauncherApp) {
             var avg = 0xFF808080.toInt()
             var lum = 0.5f
             try {
-                val wm = WallpaperManager.getInstance(app)
-                val d = if (wm.wallpaperInfo == null) wm.drawable else null
+                val d: android.graphics.drawable.Drawable? =
+                    if (preview) scene?.let { android.graphics.drawable.BitmapDrawable(app.resources, it) }
+                    else {
+                        val wm = WallpaperManager.getInstance(app)
+                        if (wm.wallpaperInfo == null) wm.drawable else null
+                    }
                 if (d != null) {
                     val w = max(8, sw / sc)
                     val h = max(8, sh / sc)
@@ -127,7 +147,11 @@ class GlassRenderer(private val app: LauncherApp) {
                     b.setPixels(a, 0, w, 0, 0, w, h)
                     bmp = b; pix = a
                 }
-            } catch (t: Throwable) { }
+            } catch (t: Throwable) {
+                // No wallpaper access, live wallpaper, out of memory ...: fall back to the frosted look.
+                Diag.e("glass.reload", t)
+                bmp = null; pix = null; hv = null
+            }
             val fb = bmp; val fp = pix; val fa = avg; val fl = lum; val fh = hv
             main.post {
                 blurred = fb; blurPix = fp; heavy = fh; scale = sc
@@ -187,6 +211,9 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     var strength = 1f
     var shadowScale = 1f
     var drawBg = true
+    /** Settings preview: an own backdrop source, positioned relative to [origin] instead of the screen. */
+    var renderer: GlassRenderer? = null
+    var origin: View? = null
 
     private val app = LauncherApp.get()
     private val dp = ctx.resources.displayMetrics.density
@@ -221,29 +248,38 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        app.glass.add(this)
+        (renderer ?: app.glass).add(this)
     }
 
     override fun onDetachedFromWindow() {
-        app.glass.remove(this)
+        (renderer ?: app.glass).remove(this)
         super.onDetachedFromWindow()
     }
 
     private fun al(x: Float): Int = (x.coerceIn(0f, 1f) * 255f).toInt()
 
     override fun onDraw(c: Canvas) {
+        try { drawGlass(c) } catch (t: Throwable) { Diag.e("glass.draw", t) }
+    }
+
+    private fun drawGlass(c: Canvas) {
         if (!drawBg) return
         val w = width.toFloat()
         val h = height.toFloat()
         if (w < 2f || h < 2f) return
         val p = app.prefs
-        val prof = p.int(K.PROFILE)
+        val prof = if (Safe.mode) 0 else p.int(K.PROFILE)
         val dark = app.isDark()
         val rad = if (fullscreen) 0f else min(radiusDp * dp, min(w, h) / 2f)
-        val g = app.glass
+        val g = renderer ?: app.glass
         val bm = if (fullscreen) (g.heavy ?: g.blurred) else g.blurred
         rect.set(0f, 0f, w, h)
         getLocationOnScreen(loc)
+        origin?.let { o ->
+            val ol = IntArray(2)
+            o.getLocationOnScreen(ol)
+            loc[0] -= ol[0]; loc[1] -= ol[1]
+        }
 
         // Soft layered shadow (drawn outside the bounds; parents must not clip children).
         val sh = p.int(K.SHADOW) / 100f * shadowScale

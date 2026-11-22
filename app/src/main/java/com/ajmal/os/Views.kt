@@ -125,6 +125,10 @@ class AppIconView(ctx: Context, private val host: IconHost) : View(ctx) {
     }
 
     override fun onDraw(c: Canvas) {
+        try { drawIcon(c) } catch (t: Throwable) { Diag.e("icon.draw", t) }
+    }
+
+    private fun drawIcon(c: Canvas) {
         val w = width
         val h = height
         val tot = s + 2 * pad
@@ -331,8 +335,8 @@ class CellLayout(ctx: Context) : ViewGroup(ctx) {
         for (i in 0 until childCount) {
             val v = getChildAt(i)
             val m = v.tag as? Item ?: continue
-            val gx = if (flow) i % cols else m.x
-            val gy = if (flow) i / cols else m.y
+            val gx = (if (flow) i % cols else m.x).coerceIn(0, max(0, cols - 1))
+            val gy = (if (flow) i / cols else m.y).coerceIn(0, max(0, rows - 1))
             val sx = if (flow) 1 else m.sx
             val sy = if (flow) 1 else m.sy
             val x = padH + gx * cw

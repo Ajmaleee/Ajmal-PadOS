@@ -32,6 +32,11 @@ class GenieView(ctx: Context, private val bmp: Bitmap, private val src: RectF) :
     }
 
     override fun onDraw(c: Canvas) {
+        if (bmp.isRecycled) return
+        try { drawMesh(c) } catch (t: Throwable) { Diag.e("genie.draw", t) }
+    }
+
+    private fun drawMesh(c: Canvas) {
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
         val sx = src.centerX()

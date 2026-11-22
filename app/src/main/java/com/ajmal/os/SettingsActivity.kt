@@ -5,10 +5,12 @@ import android.app.Activity
 import android.content.Context
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.os.Debug
@@ -29,6 +31,7 @@ class SettingsActivity : Activity() {
     private lateinit var list: LinearLayout
     private val fg = Color.WHITE
     private val sub = 0xFF8E8E93.toInt()
+    private var preview: GlassPreviewCard? = null
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(UiScale.wrap(base))
@@ -37,15 +40,44 @@ class SettingsActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = LauncherApp.get().prefs
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(0xFF0E0F13.toInt())
+        root.fitsSystemWindows = true
+        val maxW = Math.min(resources.displayMetrics.widthPixels, dpi(680))
+
+        // Live preview, pinned above the list so every slider below can be judged while it moves.
+        val pw = FrameLayout(this)
+        val card = GlassPreviewCard(this)
+        preview = card
+        pw.addView(card, FrameLayout.LayoutParams(maxW - dpi(32), dpi(188), android.view.Gravity.CENTER_HORIZONTAL).also {
+            it.topMargin = dpi(8)
+        })
+        root.addView(pw, LinearLayout.LayoutParams(-1, -2))
+        val hide = label(this, "Hide live preview", 12f, sub)
+        hide.gravity = android.view.Gravity.CENTER
+        hide.setPadding(0, dpi(4), 0, dpi(4))
+        hide.setOnClickListener {
+            val show = card.visibility != View.VISIBLE
+            card.visibility = if (show) View.VISIBLE else View.GONE
+            hide.text = if (show) "Hide live preview" else "Show live preview"
+        }
+        root.addView(hide, LinearLayout.LayoutParams(-1, -2))
+
         val sv = ScrollView(this)
-        sv.setBackgroundColor(0xFF0E0F13.toInt())
-        sv.fitsSystemWindows = true
         list = LinearLayout(this)
         list.orientation = LinearLayout.VERTICAL
-        list.setPadding(dpi(16), dpi(8), dpi(16), dpi(40))
-        sv.addView(list, FrameLayout.LayoutParams(Math.min(resources.displayMetrics.widthPixels, dpi(680)), -2, android.view.Gravity.CENTER_HORIZONTAL))
-        setContentView(sv)
+        list.setPadding(dpi(16), dpi(0), dpi(16), dpi(40))
+        sv.addView(list, FrameLayout.LayoutParams(maxW, -2, android.view.Gravity.CENTER_HORIZONTAL))
+        root.addView(sv, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
         build()
+    }
+
+    override fun onDestroy() {
+        preview?.release()
+        preview = null
+        super.onDestroy()
     }
 
     private fun header(t: String) {
@@ -76,7 +108,7 @@ class SettingsActivity : Activity() {
         r.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
         val sw = Switch(this)
         sw.isChecked = prefs.bool(key)
-        sw.setOnCheckedChangeListener { _, c -> prefs.set(key, c) }
+        sw.setOnCheckedChangeListener { _, c -> prefs.set(key, c); preview?.refresh() }
         r.addView(sw)
         r.setOnClickListener { sw.toggle() }
     }
@@ -93,9 +125,12 @@ class SettingsActivity : Activity() {
         sb.max = hi - lo
         sb.progress = prefs.int(key) - lo
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar?, p: Int, user: Boolean) { v.text = "${lo + p}$unit" }
+            override fun onProgressChanged(s: SeekBar?, p: Int, user: Boolean) {
+                v.text = "${lo + p}$unit"
+                if (user) { prefs.set(key, lo + p); preview?.refresh() }   // live: the preview follows the slider
+            }
             override fun onStartTrackingTouch(s: SeekBar?) {}
-            override fun onStopTrackingTouch(s: SeekBar?) { prefs.set(key, lo + (s?.progress ?: 0)) }
+            override fun onStopTrackingTouch(s: SeekBar?) { prefs.set(key, lo + (s?.progress ?: 0)); preview?.refresh() }
         })
         r.addView(sb)
     }
@@ -111,6 +146,7 @@ class SettingsActivity : Activity() {
                 .setSingleChoiceItems(names, prefs.int(key)) { d, w ->
                     prefs.set(key, w)
                     v.text = names[w]
+                    preview?.refresh()
                     d.dismiss()
                 }
                 .show()
@@ -178,6 +214,7 @@ class SettingsActivity : Activity() {
 
         header("Animations")
         seek("Animation speed", K.ANIM_SPEED, 50, 200, "%")
+        seek("App Library genie speed (tap the preview to try it)", K.GENIE_SPEED, 40, 250, "%")
         seek("Spring damping (lower = bouncier)", K.SPRING, 40, 100, "%")
         toggle("Reduce motion", K.REDUCE_MOTION, "Replaces springs with instant changes")
         toggle("Icon press animations", K.ICON_ANIM)
@@ -205,7 +242,7 @@ class SettingsActivity : Activity() {
             try { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) } catch (t: Throwable) { }
         }
         toggle("Use wallpaper for glass blur", K.WP_BLUR, "Static wallpapers only; live wallpapers use flat glass")
-        action("Grant wallpaper access", "Android 9 requires storage permission to read the wallpaper for blur") {
+        action("Grant wallpaper access", "Android 10 requires storage permission to read the wallpaper for blur") {
             requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), 7)
         }
         seek("Wallpaper dimming", K.DIM, 0, 80, "%")
@@ -213,17 +250,48 @@ class SettingsActivity : Activity() {
         header("Performance")
         action("Apply Ultra Lite preset", "Cached blur, minimal refraction, light shadows") {
             prefs.set(K.PROFILE, 0); prefs.set(K.REDUCED_BLUR, true); prefs.set(K.REDUCED_REFR, true)
-            prefs.set(K.SHADOW, 25); prefs.set(K.DECOR_ANIM, false); toast("Ultra Lite applied")
+            prefs.set(K.SHADOW, 25); prefs.set(K.DECOR_ANIM, false); preview?.refresh(); toast("Ultra Lite applied")
         }
         toggle("Reduced blur", K.REDUCED_BLUR, "Smaller, cheaper blur texture")
         toggle("Reduced refraction", K.REDUCED_REFR)
         toggle("FPS and memory overlay", K.FPS)
         action("Memory diagnostics", null) { showMemory() }
 
+        header("Hidden apps")
+        action("Hidden apps password", if (Vault.isSet(this)) "A password is set. Tap to change or remove it" else "Not set yet. Hidden apps open only with a password") {
+            if (!Vault.isSet(this)) VaultUi.create(this) { recreate() }
+            else AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Hidden apps password")
+                .setItems(arrayOf("Change password", "Remove password", "Forgot it? Use my screen lock")) { _, i ->
+                    when (i) {
+                        0 -> VaultUi.change(this) { recreate() }
+                        1 -> VaultUi.remove(this) { recreate() }
+                        else -> resetWithScreenLock()
+                    }
+                }.show()
+        }
+        action("How it works", "Long-press an app and choose Move to Hidden. The Hidden card in the App Library opens only with the password, and hidden apps never appear in search.") { }
+
+        header("Diagnostics")
+        action("View error log", "Crashes and recovered errors. Share it when reporting a bug") { showLog() }
+        action(if (Safe.mode) "Safe mode is ON. Tap to turn it off" else "Safe mode is off",
+            "After repeated crashes the launcher pauses blur, glass refraction, widgets and the genie so it always starts") {
+            if (Safe.mode) { Safe.exit(); toast("Safe mode off"); recreate() }
+            else toast("Safe mode switches on by itself after repeated crashes")
+        }
+        action("Restore layout backup", "Brings back the last automatic backup of the home screen layout") {
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Restore the last layout backup?")
+                .setPositiveButton("Restore") { _, _ ->
+                    toast(if (LauncherApp.get().model.restoreBackup()) "Backup restored" else "No usable backup found")
+                }
+                .setNegativeButton("Cancel", null).show()
+        }
+
         header("Backup")
         action("Export settings and layout", "Appearance, gestures, dock, folders, positions, widgets list") {
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json")
-                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, "ajmal-os-backup.json"), REQ_EXPORT)
+                .addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_TITLE, "ajmalpad-os-backup.json"), REQ_EXPORT)
         }
         action("Import settings and layout", null) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE), REQ_IMPORT)
@@ -238,7 +306,83 @@ class SettingsActivity : Activity() {
         action("Set AjmalPad OS as default home app", null) {
             try { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) } catch (t: Throwable) { }
         }
+
+        header("About")
+        val about = rowBase()
+        about.addView(label(this, "AjmalPad OS", 18f, fg))
+        about.addView(label(this, "Created by Ajmal Ali A", 14f, sub))
+        val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (t: Throwable) { null }
+        if (ver != null) about.addView(label(this, "Version $ver", 12f, sub))
+        action("GitHub", "github.com/Ajmaleee") { openUrl("https://github.com/Ajmaleee") }
+        action("Instagram", "@ajmaleee__") { openUrl("https://www.instagram.com/ajmaleee__/") }
+        action("Source code", "github.com/Ajmaleee/Ajmal-PadOS") { openUrl("https://github.com/Ajmaleee/Ajmal-PadOS") }
+        val note = rowBase()
+        note.addView(label(this, "You can always contact me to add new features, fix bugs, or submit a PR.", 14f, fg))
     }
+
+    private fun openUrl(u: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u))) }
+        catch (t: Throwable) { toast("No browser found for $u") }
+    }
+
+    private fun showLog() {
+        val text = Diag.readLog().ifBlank { "No errors recorded." }
+        val shown = if (text.length > 12000) "...\n" + text.takeLast(12000) else text
+        val tv = TextView(this)
+        tv.text = shown
+        tv.setTextIsSelectable(true)
+        tv.typeface = Typeface.MONOSPACE
+        tv.textSize = 11f
+        tv.setTextColor(Color.WHITE)
+        tv.setPadding(dpi(16), dpi(8), dpi(16), dpi(8))
+        val box = ScrollView(this)
+        box.addView(tv)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Error log").setView(box)
+            .setPositiveButton("Share") { _, _ -> shareLog(text) }
+            .setNeutralButton("Clear") { _, _ -> Diag.clearLog(); toast("Log cleared") }
+            .setNegativeButton("Close", null).show()
+    }
+
+    private fun shareLog(text: String) {
+        try {
+            val i = Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "AjmalPad OS error log")
+                .putExtra(Intent.EXTRA_TEXT, text.takeLast(60000))
+            startActivity(Intent.createChooser(i, "Share log"))
+        } catch (t: Throwable) { toast("Nothing to share with") }
+    }
+
+    /** Forgotten password: prove who you are with the device's own screen lock, then the password is removed. */
+    private fun resetWithScreenLock() {
+        val kg = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        val i = try { kg?.createConfirmDeviceCredentialIntent("Reset Hidden apps password", "Confirm your screen lock to remove the password") } catch (t: Throwable) { null }
+        if (i != null) {
+            try { startActivityForResult(i, REQ_CRED) } catch (t: Throwable) { Diag.e("settings.credential", t); toast("Could not ask for your screen lock") }
+        } else {
+            AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("No screen lock is set")
+                .setMessage("This device has no PIN, pattern or password, so the Hidden apps password cannot be verified. Remove it anyway?")
+                .setPositiveButton("Remove") { _, _ -> Vault.clear(this); toast("Password removed"); recreate() }
+                .setNegativeButton("Cancel", null).show()
+        }
+    }
+
+    private fun readLimited(uri: Uri, max: Int): String? = try {
+        contentResolver.openInputStream(uri)?.use { st ->
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(8192)
+            var total = 0
+            while (true) {
+                val n = st.read(buf)
+                if (n < 0) break
+                total += n
+                if (total > max) throw java.io.IOException("too large")
+                out.write(buf, 0, n)
+            }
+            String(out.toByteArray())
+        }
+    } catch (t: Throwable) { Diag.e("settings.read", t); null }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
@@ -262,22 +406,27 @@ class SettingsActivity : Activity() {
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
+        if (req == REQ_CRED) {
+            if (res == RESULT_OK) { Vault.clear(this); toast("Hidden apps password removed"); recreate() }
+            else toast("Screen lock was not confirmed")
+            return
+        }
         val uri: Uri = data?.data ?: return
         if (res != RESULT_OK) return
         when (req) {
             REQ_PACK -> LauncherApp.get().icons.importPack(uri) { n -> prefs.touch(); toast("Imported $n icons") }
             REQ_EXPORT -> Thread {
                 val ok = try {
-                    contentResolver.openOutputStream(uri)!!.use { it.write(LauncherApp.get().model.exportAll().toByteArray()) }
+                    (contentResolver.openOutputStream(uri) ?: throw java.io.IOException("cannot open")).use { it.write(LauncherApp.get().model.exportAll().toByteArray()) }
                     true
-                } catch (t: Throwable) { false }
+                } catch (t: Throwable) { Diag.e("settings.export", t); false }
                 runOnUiThread { toast(if (ok) "Exported" else "Export failed") }
             }.start()
             REQ_IMPORT -> Thread {
-                val text = try { contentResolver.openInputStream(uri)!!.use { String(it.readBytes()) } } catch (t: Throwable) { null }
+                val text = readLimited(uri, 2_000_000)
                 runOnUiThread {
-                    val ok = text != null && LauncherApp.get().model.importAll(text)
-                    toast(if (ok) "Imported. Return to the home screen." else "Not a valid AjmalPad OS backup")
+                    val ok = text != null && guard("settings.import", false) { LauncherApp.get().model.importAll(text) }
+                    toast(if (ok) "Imported. Return to the home screen." else "Not a valid AjmalPad OS backup. Nothing was changed.")
                     if (ok) recreate()
                 }
             }.start()
@@ -293,5 +442,6 @@ class SettingsActivity : Activity() {
         const val REQ_PACK = 21
         const val REQ_EXPORT = 22
         const val REQ_IMPORT = 23
+        const val REQ_CRED = 24
     }
 }

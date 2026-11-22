@@ -19,7 +19,7 @@ object K {
     const val DOCK_MARGIN = "dock_margin"; const val SEARCH_PILL = "search_pill"
     const val LOCK_LAYOUT = "lock_layout"; const val AUTO_ADD = "auto_add"
     // Animation
-    const val ANIM_SPEED = "anim_speed"; const val SPRING = "spring"; const val REDUCE_MOTION = "reduce_motion"
+    const val ANIM_SPEED = "anim_speed"; const val GENIE_SPEED = "genie_speed"; const val SPRING = "spring"; const val REDUCE_MOTION = "reduce_motion"
     const val DECOR_ANIM = "decor_anim"; const val HAPTIC = "haptic"; const val ICON_ANIM = "icon_anim"
     // Gestures
     const val G_UP = "g_up"; const val G_DOWN = "g_down"; const val G_LEFT = "g_left"; const val G_RIGHT = "g_right"
@@ -56,7 +56,7 @@ class Prefs(ctx: Context) {
         d(K.DOCK_VISIBLE, true); d(K.DOCK_COUNT, 5); d(K.DOCK_BG, true); d(K.DOCK_GLASS, 70)
         d(K.DOCK_ICON, 60); d(K.DOCK_MARGIN, 10); d(K.SEARCH_PILL, true); d(K.LOCK_LAYOUT, false)
         d(K.AUTO_ADD, true)
-        d(K.ANIM_SPEED, 100); d(K.SPRING, 85); d(K.REDUCE_MOTION, false); d(K.DECOR_ANIM, true)
+        d(K.GENIE_SPEED, 100); d(K.ANIM_SPEED, 100); d(K.SPRING, 85); d(K.REDUCE_MOTION, false); d(K.DECOR_ANIM, true)
         d(K.HAPTIC, true); d(K.ICON_ANIM, true)
         d(K.G_UP, Act.LIBRARY); d(K.G_DOWN, Act.SEARCH); d(K.G_LEFT, Act.NEXT_PAGE)
         d(K.G_RIGHT, Act.PREV_PAGE); d(K.G_DOUBLE, Act.NONE); d(K.G_PINCH, Act.OVERVIEW)
@@ -71,8 +71,9 @@ class Prefs(ctx: Context) {
     fun cols(): Int = int(K.COLS)
     fun rows(): Int = int(K.ROWS)
 
-    fun int(k: String): Int = sp.getInt(k, defs[k] as Int)
-    fun bool(k: String): Boolean = sp.getBoolean(k, defs[k] as Boolean)
+    // A wrongly-typed or missing value (damaged backup, old build) falls back to the default instead of crashing.
+    fun int(k: String): Int = try { sp.getInt(k, defs[k] as Int) } catch (t: Throwable) { (defs[k] as? Int) ?: 0 }
+    fun bool(k: String): Boolean = try { sp.getBoolean(k, defs[k] as Boolean) } catch (t: Throwable) { (defs[k] as? Boolean) ?: false }
 
     fun set(k: String, v: Any) {
         val e = sp.edit()

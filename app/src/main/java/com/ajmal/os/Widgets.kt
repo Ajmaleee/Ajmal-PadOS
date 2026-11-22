@@ -29,24 +29,56 @@ class WidgetManager(private val act: HomeActivity) {
     fun stop() { try { host.stopListening() } catch (t: Throwable) { } }
     fun delete(id: Int) { try { host.deleteAppWidgetId(id) } catch (t: Throwable) { } }
 
-    fun createView(item: Item): View? {
-        val info = mgr.getAppWidgetInfo(item.widgetId) ?: return null
-        val hv = try { host.createView(act, item.widgetId, info) } catch (t: Throwable) { return null }
+    /** A stand-in for a widget that cannot be shown right now. The widget is kept, not deleted. */
+    private fun placeholder(item: Item, text: String): View {
         val fr = WidgetFrame(act, act)
-        fr.addView(hv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val tv = label(act, text, 13f, android.graphics.Color.WHITE)
+        tv.gravity = android.view.Gravity.CENTER
+        tv.background = roundBg(0x44000000, act.dpf(16f))
+        fr.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         fr.tag = item
         return fr
     }
 
+    /**
+     * Null only when the widget's app is really gone (the item is then removed). A provider that is merely
+     * updating, a broken widget, or Safe mode all show a placeholder instead of crashing or losing the widget.
+     */
+    fun createView(item: Item): View? {
+        if (Safe.mode) return placeholder(item, "Widgets are paused in safe mode")
+        val info = try { mgr.getAppWidgetInfo(item.widgetId) } catch (t: Throwable) { Diag.e("widget.info", t); null }
+        if (info == null) {
+            return if (act.model.isInstalled(item.pkg)) placeholder(item, "Widget unavailable") else null
+        }
+        val hv = try { host.createView(act, item.widgetId, info) } catch (t: Throwable) {
+            Diag.e("widget.create", t)
+            return placeholder(item, "Widget failed to load")
+        }
+        return try {
+            val fr = WidgetFrame(act, act)
+            fr.addView(hv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            fr.tag = item
+            fr
+        } catch (t: Throwable) {
+            Diag.e("widget.frame", t)
+            placeholder(item, "Widget failed to load")
+        }
+    }
+
     fun showPicker() {
-        val list = ArrayList<AppWidgetProviderInfo>(mgr.installedProviders)
+        if (act.isFinishing) return
+        val list = try { ArrayList<AppWidgetProviderInfo>(mgr.installedProviders) } catch (t: Throwable) {
+            Diag.e("widget.providers", t)
+            Toast.makeText(act, "Widgets are not available right now", Toast.LENGTH_SHORT).show()
+            return
+        }
         val pm = act.packageManager
-        list.sortBy { it.loadLabel(pm).lowercase() }
+        list.sortBy { try { it.loadLabel(pm).lowercase() } catch (t: Throwable) { "" } }
         if (list.isEmpty()) { Toast.makeText(act, "No widgets available", Toast.LENGTH_SHORT).show(); return }
         val den = act.resources.displayMetrics.densityDpi
         val adapter = object : ArrayAdapter<AppWidgetProviderInfo>(act, 0, list) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val info = getItem(position)!!
+                val info = getItem(position) ?: return convertView ?: View(act)
                 val row = (convertView as? LinearLayout) ?: LinearLayout(act).apply {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(act.dpi(12), act.dpi(8), act.dpi(12), act.dpi(8))
@@ -61,18 +93,24 @@ class WidgetManager(private val act: HomeActivity) {
                 val d = try { info.loadPreviewImage(act, 0) ?: info.loadIcon(act, den) } catch (t: Throwable) { null }
                 iv.setImageDrawable(d)
                 val dm = act.resources.displayMetrics
-                tv.text = info.loadLabel(pm) + "  (" + (info.minWidth / dm.density).toInt() + "×" + (info.minHeight / dm.density).toInt() + " dp)"
+                tv.text = (try { info.loadLabel(pm) } catch (t: Throwable) { info.provider.packageName }) + "  (" + (info.minWidth / dm.density).toInt() + "×" + (info.minHeight / dm.density).toInt() + " dp)"
                 return row
             }
         }
-        AlertDialog.Builder(act, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle("Add widget")
-            .setAdapter(adapter) { _, i -> bind(list[i]) }
-            .show()
+        try {
+            AlertDialog.Builder(act, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Add widget")
+                .setAdapter(adapter) { _, i -> guardRun("widget.bind") { bind(list[i]) } }
+                .show()
+        } catch (t: Throwable) { Diag.e("widget.picker", t) }
     }
 
     private fun bind(info: AppWidgetProviderInfo) {
-        val id = host.allocateAppWidgetId()
+        val id = try { host.allocateAppWidgetId() } catch (t: Throwable) {
+            Diag.e("widget.allocate", t)
+            Toast.makeText(act, "Could not add the widget", Toast.LENGTH_SHORT).show()
+            return
+        }
         pendingId = id
         val ok = try { mgr.bindAppWidgetIdIfAllowed(id, info.provider) } catch (t: Throwable) { false }
         if (ok) configureOrFinish(id)
@@ -90,7 +128,7 @@ class WidgetManager(private val act: HomeActivity) {
     }
 
     private fun configureOrFinish(id: Int) {
-        val info = mgr.getAppWidgetInfo(id)
+        val info = try { mgr.getAppWidgetInfo(id) } catch (t: Throwable) { null }
         if (info == null) { cancel(); return }
         if (info.configure != null) {
             try { host.startAppWidgetConfigureActivityForResult(act, id, 0, HomeActivity.REQ_CONFIG, null) }
@@ -98,7 +136,9 @@ class WidgetManager(private val act: HomeActivity) {
         } else place(id)
     }
 
-    fun onResult(req: Int, res: Int, data: Intent?) {
+    fun onResult(req: Int, res: Int, data: Intent?) = guardRun("widget.result") { handleResult(req, res, data) }
+
+    private fun handleResult(req: Int, res: Int, data: Intent?) {
         val id = if (pendingId != -1) pendingId else data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
         if (res != Activity.RESULT_OK) { cancel(); return }
         if (req == HomeActivity.REQ_BIND) configureOrFinish(id)
@@ -107,7 +147,7 @@ class WidgetManager(private val act: HomeActivity) {
 
     private fun place(id: Int) {
         pendingId = -1
-        val info = mgr.getAppWidgetInfo(id)
+        val info = try { mgr.getAppWidgetInfo(id) } catch (t: Throwable) { null }
         if (info == null) { delete(id); return }
         val m = act.model.newItem(Item.WIDGET)
         m.widgetId = id

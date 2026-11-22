@@ -112,7 +112,7 @@ class DragController(private val h: HomeActivity) {
     }
 
     private fun compute(rx: Float, ry: Float): Target {
-        val m = item!!
+        val m = item ?: return Target()
         val t = Target()
         val dr = h.dockRect()
         if (m.type != Item.WIDGET && dr != null && ry >= dr.top - 10f * h.den) {
@@ -182,15 +182,15 @@ class DragController(private val h: HomeActivity) {
                 f.title = "Folder"
                 f.container = o.container; f.page = o.page; f.x = o.x; f.y = o.y
                 md.items.add(f)
-                o.container = Item.IN_FOLDER; o.parent = f.id; o.x = 0
-                m.container = Item.IN_FOLDER; m.parent = f.id; m.x = 1
+                o.container = Item.IN_FOLDER; o.parent = f.id; o.x = 0; o.y = 0
+                m.container = Item.IN_FOLDER; m.parent = f.id; m.x = 1; m.y = 0
                 return true
             }
             FOLDER_ADD -> {
                 val o = t.other ?: return false
                 if (m.container == Item.IN_FOLDER && m.parent == o.id) return false
                 val n = md.children(o.id).size
-                m.container = Item.IN_FOLDER; m.parent = o.id; m.x = n
+                m.container = Item.IN_FOLDER; m.parent = o.id; m.x = n; m.y = 0
                 return true
             }
             DOCK -> {
@@ -199,7 +199,7 @@ class DragController(private val h: HomeActivity) {
                 val idx = t.x.coerceAtMost(list.size)
                 m.container = Item.DOCK; m.parent = 0
                 list.add(idx, m)
-                for ((i, d) in list.withIndex()) d.x = i
+                for ((i, d) in list.withIndex()) { d.x = i; d.y = 0; d.sx = 1; d.sy = 1 }
                 return true
             }
         }

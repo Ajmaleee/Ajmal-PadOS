@@ -115,10 +115,17 @@ object SpringDriver : Choreographer.FrameCallback {
         tmp.addAll(list)
         for (s in tmp) {
             if (!s.isRunning) continue
-            if (s.step(dt)) {
+            // One failing animation must neither stop the others nor the frame loop itself.
+            try {
+                if (s.step(dt)) {
+                    s.isRunning = false
+                    list.remove(s)
+                    s.finish()
+                }
+            } catch (t: Throwable) {
+                Diag.e("spring", t)
                 s.isRunning = false
                 list.remove(s)
-                s.finish()
             }
         }
         if (list.isEmpty()) last = 0L else post()

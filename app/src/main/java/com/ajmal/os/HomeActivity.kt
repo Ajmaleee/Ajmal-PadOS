@@ -133,7 +133,10 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         }
         model.listeners.add { if (!drag.active) refreshAll(); library?.reload() }
         app.glass.changeCbs.add { for (v in viewCache.values) v.invalidate() }
-        model.whenReady { applyAll() }
+        model.whenReady {
+            applyAll()
+            showNotices()
+        }
         askWallpaperAccess()
     }
 
@@ -142,7 +145,9 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
      * back for a moment). With it hidden the dock sits at the screen edge; if the bar stays visible anyway, or
      * hiding is switched off, the actual bar height is reserved so nothing is covered.
      */
-    private fun applyImmersive() {
+    private fun applyImmersive() = guardRun("immersive") { applyImmersiveImpl() }
+
+    private fun applyImmersiveImpl() {
         var f = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         if (prefs.bool(K.HIDE_NAV)) f = f or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -183,6 +188,10 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     override fun onConfigurationChanged(c: android.content.res.Configuration) {
         super.onConfigurationChanged(c)
         if (!::pager.isInitialized) return
+        guardRun("onConfigurationChanged") { handleConfigChange() }
+    }
+
+    private fun handleConfigChange() {
         if (refreshScreen()) {
             dismissMenu()
             folderOverlay?.dismiss(true)
@@ -218,8 +227,15 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         super.attachBaseContext(UiScale.wrap(base))
     }
 
+    /** Tells the user once about a repaired layout or an automatic safe mode. */
+    private fun showNotices() {
+        model.loadNote?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); model.loadNote = null }
+        Safe.notice?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show(); Safe.notice = null }
+    }
+
     override fun onResume() {
         super.onResume()
+        Safe.autoExit()
         applyImmersive()
         if (UiScale.percent() != scaleApplied) { recreate(); return }
         app.glass.reloadIfChanged()
@@ -412,7 +428,9 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         if (old != lastSig) { applyChrome(); refreshAll() }
     }
 
-    private fun applyAll() {
+    private fun applyAll() = guardRun("applyAll") { applyAllImpl() }
+
+    private fun applyAllImpl() {
         appliedRev = prefs.rev
         IosIcons.on = prefs.bool(K.IOS_ICONS)
         model.resort()
@@ -435,7 +453,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     fun pageLayoutFor(pid: Int): CellLayout? = pageLayouts[pid]
     fun currentPageId(): Int {
         val v = model.visiblePages()
-        return v.getOrElse(pager.index) { v[0] }
+        return v.getOrElse(pager.index) { v.firstOrNull() ?: 0 }
     }
 
     fun goToPageId(pid: Int) {
@@ -461,7 +479,9 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         return v
     }
 
-    fun refreshAll() {
+    fun refreshAll() = guardRun("refreshAll") { refreshAllImpl() }
+
+    private fun refreshAllImpl() {
         if (!model.ready) return
         val vis = model.visiblePages()
         for (v in viewCache.values) (v.parent as? ViewGroup)?.removeView(v)
@@ -477,7 +497,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             cl.cols = cols; cl.rows = rows; cl.padH = hs; cl.padV = 0
             cl.clearHint()
             for (m in model.pageItems(pid)) {
-                val v = viewFor(m, iconPx, labels)
+                val v = guard<View?>("viewFor", null) { viewFor(m, iconPx, labels) }
                 if (v == null) { if (m.type == Item.WIDGET) dead.add(m); continue }
                 used.add(m.id)
                 cl.addView(v)
@@ -488,7 +508,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         dockLayout.padH = dpi(8); dockLayout.padV = dpi(4)
         dockLayout.clearHint()
         for (m in model.dockItems()) {
-            val v = viewFor(m, dockIconPx, false) ?: continue
+            val v = guard<View?>("viewFor.dock", null) { viewFor(m, dockIconPx, false) } ?: continue
             used.add(m.id)
             dockLayout.addView(v)
         }
@@ -698,10 +718,14 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     }
 
     private fun lockScreen() {
-        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as? DevicePolicyManager ?: return
         val cn = ComponentName(this, LockAdmin::class.java)
-        if (dpm.isAdminActive(cn)) dpm.lockNow()
-        else {
+        if (dpm.isAdminActive(cn)) {
+            try { dpm.lockNow() } catch (t: SecurityException) {
+                Diag.e("lockNow", t)
+                Toast.makeText(this, "Screen lock permission was removed. Enable it again in Settings.", Toast.LENGTH_LONG).show()
+            }
+        } else {
             val i = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, cn)
             i.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Needed only to lock the screen with a gesture.")
@@ -716,7 +740,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         } catch (t: Throwable) { }
     }
 
-    fun openSettings() { startActivity(Intent(this, SettingsActivity::class.java)) }
+    fun openSettings() { try { startActivity(Intent(this, SettingsActivity::class.java)) } catch (t: Throwable) { Diag.e("openSettings", t) } }
 
     private fun chooseWallpaper() {
         try { startActivity(Intent.createChooser(Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper")) } catch (t: Throwable) { }
@@ -732,7 +756,13 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     fun openLibrary(src: View? = null) {
         if (library != null) return
         setEditing(false)
-        library = LibraryOverlay(this, src ?: (if (dockVisible) libDock else null)).also { it.show() }
+        try {
+            library = LibraryOverlay(this, src ?: (if (dockVisible) libDock else null)).also { it.show() }
+        } catch (t: Throwable) {
+            Diag.e("openLibrary", t)
+            library = null
+            Toast.makeText(this, "Could not open the App Library", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onOverscroll() {
@@ -897,7 +927,10 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             startActivity(i, opts)
             model.noteLaunch(a)
         } catch (t: Throwable) {
-            Toast.makeText(this, "Cannot open ${a.label}", Toast.LENGTH_SHORT).show()
+            Diag.e("launch", t)
+            val msg = if (t is android.content.ActivityNotFoundException) "${a.label} is no longer installed"
+                else "Cannot open ${a.label}"
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
             model.refresh()
         }
     }
@@ -958,10 +991,11 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             model.save(); library?.reload()
         })
         val hid = model.hiddenApps.contains(a.key)
-        acts.add((if (hid) "Show on home screen" else "Hide from home screen") to {
+        acts.add((if (hid) "Remove from Hidden" else "Move to Hidden (password)") to {
             if (hid) model.hiddenApps.remove(a.key)
             else {
                 model.hiddenApps.add(a.key)
+                if (!Vault.isSet(this)) Toast.makeText(this, "Hidden apps open with a password. You will be asked to create one when you open Hidden in the App Library.", Toast.LENGTH_LONG).show()
                 for (m in ArrayList(model.items)) if (m.type == Item.APP && m.key == a.key) model.items.remove(m)
                 model.tidy()
                 refreshAll()

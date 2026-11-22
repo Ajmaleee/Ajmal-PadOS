@@ -15,6 +15,7 @@ import android.provider.MediaStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
@@ -92,6 +93,11 @@ class LauncherModel(private val app: LauncherApp) {
     private val io = Executors.newSingleThreadExecutor()
     private val waiters = ArrayList<() -> Unit>()
     private val file = File(app.filesDir, "state.json")
+    private val backupFile = File(app.filesDir, "state.bak")
+    /** False until an app query has succeeded; a failed query must never be mistaken for "all apps removed". */
+    @Volatile var queryOk = false
+    /** One-shot message for the home screen about a repaired / restored layout. */
+    @Volatile var loadNote: String? = null
     private var dirty = false
     private var refreshPending = false
 
@@ -99,21 +105,55 @@ class LauncherModel(private val app: LauncherApp) {
 
     // ---------------------------------------------------------------- loading
 
+    private fun readFile(f: File): String? =
+        try { if (f.exists() && f.length() > 0L) f.readText() else null } catch (t: Throwable) { Diag.e("model.read", t); null }
+
+    private fun tryParse(text: String): Boolean = try {
+        parse(JSONObject(text)); true
+    } catch (t: Throwable) {
+        Diag.e("model.parse", t)
+        resetState()
+        false
+    }
+
+    /** Keeps a damaged state file for inspection instead of silently overwriting it. */
+    private fun quarantine() {
+        guardRun("model.quarantine") {
+            if (file.exists()) file.copyTo(File(file.parentFile, "state.corrupt"), overwrite = true)
+        }
+    }
+
     fun load() {
         io.execute {
-            val text = try { if (file.exists()) file.readText() else null } catch (e: Exception) { null }
-            val list = queryApps()
-            app.icons.loadStamps()
+            var list: List<AppInfo>? = null
+            try { list = queryApps() } catch (t: Throwable) { Diag.e("model.queryApps", t) }
+            guardRun("icons.stamps") { app.icons.loadStamps() }
+            val mainText = readFile(file)
+            val backupText = readFile(backupFile)
+            val apps0 = list
             main.post {
-                if (text != null) {
-                    try { parse(JSONObject(text)) } catch (e: Exception) { }
+                try {
+                    var ok = false
+                    if (mainText != null && tryParse(mainText)) ok = true
+                    else if (backupText != null && tryParse(backupText)) {
+                        ok = true
+                        loadNote = "Your layout file was damaged; the last backup was restored."
+                    }
+                    if (!ok && (mainText != null || backupText != null)) {
+                        quarantine()
+                        loadNote = "Your layout file was damaged; a fresh layout was created."
+                    }
+                    if (apps0 != null) { updateApps(apps0); queryOk = true }
+                    ready = true
+                    reconcile()
+                } catch (t: Throwable) {
+                    Diag.e("model.finishLoad", t)
+                    ready = true
                 }
-                updateApps(list)
-                ready = true
-                reconcile()
+                if (apps0 == null) main.postDelayed({ refresh() }, 3000)
                 val w = ArrayList(waiters)
                 waiters.clear()
-                for (r in w) r()
+                for (r in w) guardRun("model.waiter") { r() }
             }
         }
         try {
@@ -125,7 +165,15 @@ class LauncherModel(private val app: LauncherApp) {
                 override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) { refresh() }
                 override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) { refresh() }
             }, main)
-        } catch (e: Exception) { }
+        } catch (e: Exception) { Diag.e("model.callback", e) }
+    }
+
+    /** Restores the automatic backup of the layout (used from Settings -> Diagnostics). */
+    fun restoreBackup(): Boolean {
+        val text = readFile(backupFile) ?: return false
+        if (!tryParse(text)) return false
+        guardRun("model.restore") { reconcile(); save(); app.prefs.touch() }
+        return true
     }
 
     fun whenReady(r: () -> Unit) {
@@ -137,12 +185,16 @@ class LauncherModel(private val app: LauncherApp) {
         refreshPending = true
         main.postDelayed({
             refreshPending = false
-            io.execute {
-                val list = queryApps()
+            io.safe("model.refresh") {
+                var list: List<AppInfo>? = null
+                try { list = queryApps() } catch (t: Throwable) { Diag.e("model.queryApps", t) }
+                val fresh = list
                 main.post {
-                    updateApps(list)
-                    reconcile()
-                    for (l in ArrayList(listeners)) l()
+                    guardRun("model.refreshApply") {
+                        if (fresh != null) { updateApps(fresh); queryOk = true }
+                        reconcile()
+                        for (l in ArrayList(listeners)) guardRun("model.listener") { l() }
+                    }
                 }
             }
         }, 300)
@@ -152,19 +204,32 @@ class LauncherModel(private val app: LauncherApp) {
         val la = app.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
         val out = ArrayList<AppInfo>()
         for (ai in la.getActivityList(null, Process.myUserHandle())) {
-            val cn = ai.componentName
-            if (cn.packageName == app.packageName) continue
-            val info = ai.applicationInfo
-            val cat = if (Build.VERSION.SDK_INT >= 26) info.category else -1
-            out.add(
-                AppInfo(
-                    cn.packageName, cn.className, ai.label.toString(), ai.firstInstallTime,
-                    (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0, cat
+            try {
+                val cn = ai.componentName
+                if (cn.packageName == app.packageName) continue
+                val info = ai.applicationInfo
+                val cat = if (Build.VERSION.SDK_INT >= 26) info.category else -1
+                val name = (ai.label ?: cn.packageName).toString().ifBlank { cn.packageName }
+                out.add(
+                    AppInfo(
+                        cn.packageName, cn.className, name, ai.firstInstallTime,
+                        (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0, cat
+                    )
                 )
-            )
+            } catch (t: Throwable) { Diag.e("model.queryApps.item", t) }
         }
         out.sortBy { it.lower }
         return out
+    }
+
+    /** True while the package is still on the device (even if it has no launcher activity right now). */
+    fun isInstalled(pkg: String): Boolean = try {
+        app.packageManager.getApplicationInfo(pkg, 0)
+        true
+    } catch (e: PackageManager.NameNotFoundException) {
+        false
+    } catch (t: Throwable) {
+        true
     }
 
     /** Re-sort after the iOS-names switch changed what labels say. */
@@ -181,37 +246,72 @@ class LauncherModel(private val app: LauncherApp) {
 
     // ---------------------------------------------------------------- persistence
 
-    private fun parse(o: JSONObject) {
-        nextId = o.optLong("nextId", 1L)
-        nextPage = o.optInt("nextPage", 1)
+    private fun resetState() {
         pageOrder.clear(); hiddenPages.clear(); known.clear(); favorites.clear(); hiddenApps.clear()
         customCat.clear(); usage.clear(); searches.clear(); items.clear()
-        o.optJSONArray("pages")?.let { for (i in 0 until it.length()) pageOrder.add(it.getInt(i)) }
-        o.optJSONArray("hiddenPages")?.let { for (i in 0 until it.length()) hiddenPages.add(it.getInt(i)) }
-        o.optJSONArray("known")?.let { for (i in 0 until it.length()) known.add(it.getString(i)) }
-        o.optJSONArray("favs")?.let { for (i in 0 until it.length()) favorites.add(it.getString(i)) }
-        o.optJSONArray("hidden")?.let { for (i in 0 until it.length()) hiddenApps.add(it.getString(i)) }
-        o.optJSONArray("searches")?.let { for (i in 0 until it.length()) searches.add(it.getString(i)) }
-        o.optJSONObject("cats")?.let { c ->
-            val k = c.keys()
-            while (k.hasNext()) { val n = k.next(); customCat[n] = c.getString(n) }
+    }
+
+    /** Throws only if the essentials are unreadable; damaged optional sections or single items are skipped. */
+    private fun parse(o: JSONObject) {
+        resetState()
+        nextId = o.optLong("nextId", 1L)
+        nextPage = o.optInt("nextPage", 1)
+        guardRun("model.parse.pages") {
+            o.optJSONArray("pages")?.let { for (i in 0 until it.length()) pageOrder.add(it.getInt(i)) }
+            o.optJSONArray("hiddenPages")?.let { for (i in 0 until it.length()) hiddenPages.add(it.getInt(i)) }
         }
-        o.optJSONObject("usage")?.let { c ->
-            val k = c.keys()
-            while (k.hasNext()) { val n = k.next(); usage[n] = c.getInt(n) }
+        guardRun("model.parse.sets") {
+            o.optJSONArray("known")?.let { for (i in 0 until it.length()) known.add(it.getString(i)) }
+            o.optJSONArray("favs")?.let { for (i in 0 until it.length()) favorites.add(it.getString(i)) }
+            o.optJSONArray("hidden")?.let { for (i in 0 until it.length()) hiddenApps.add(it.getString(i)) }
+            o.optJSONArray("searches")?.let { for (i in 0 until it.length()) searches.add(it.getString(i)) }
         }
+        guardRun("model.parse.cats") {
+            o.optJSONObject("cats")?.let { c ->
+                val k = c.keys()
+                while (k.hasNext()) { val n = k.next(); customCat[n] = c.getString(n) }
+            }
+        }
+        guardRun("model.parse.usage") {
+            o.optJSONObject("usage")?.let { c ->
+                val k = c.keys()
+                while (k.hasNext()) { val n = k.next(); usage[n] = c.getInt(n) }
+            }
+        }
+        var skipped = 0
         val arr = o.optJSONArray("items")
         if (arr != null) {
             for (i in 0 until arr.length()) {
-                val j = arr.getJSONObject(i)
-                val m = Item(j.getLong("id"), j.getInt("t"))
-                m.container = j.optInt("c"); m.parent = j.optLong("p"); m.page = j.optInt("pg")
-                m.x = j.optInt("x"); m.y = j.optInt("y"); m.sx = j.optInt("sx", 1); m.sy = j.optInt("sy", 1)
-                m.title = j.optString("ti"); m.pkg = j.optString("pk"); m.cls = j.optString("cl")
-                m.widgetId = j.optInt("w", -1)
-                items.add(m)
+                try {
+                    val j = arr.getJSONObject(i)
+                    val m = Item(j.getLong("id"), j.getInt("t"))
+                    m.container = j.optInt("c"); m.parent = j.optLong("p"); m.page = j.optInt("pg")
+                    m.x = max(0, j.optInt("x")); m.y = max(0, j.optInt("y"))
+                    m.sx = max(1, j.optInt("sx", 1)); m.sy = max(1, j.optInt("sy", 1))
+                    // Dock slots and folder children only use x. An old build saved y = -1 for them, which drew
+                    // dock icons one row above the dock, outside its touch area.
+                    if (m.container != Item.HOME) { m.y = 0; m.sx = 1; m.sy = 1 }
+                    m.title = j.optString("ti"); m.pkg = j.optString("pk"); m.cls = j.optString("cl")
+                    m.widgetId = j.optInt("w", -1)
+                    items.add(m)
+                } catch (t: Throwable) { skipped++ }
             }
         }
+        if (skipped > 0) Diag.e("model.parse.items", IOException("$skipped damaged item(s) skipped"))
+        // Repairs: unique ids, id/page counters ahead of what exists, every used page present.
+        var maxId = 0L
+        val seen = HashSet<Long>()
+        val it2 = items.iterator()
+        while (it2.hasNext()) {
+            val m = it2.next()
+            if (!seen.add(m.id)) { it2.remove(); continue }
+            if (m.id > maxId) maxId = m.id
+        }
+        if (nextId <= maxId) nextId = maxId + 1
+        for (m in items) if (m.container == Item.HOME && !pageOrder.contains(m.page)) pageOrder.add(m.page)
+        var maxPage = -1
+        for (p in pageOrder) if (p > maxPage) maxPage = p
+        if (nextPage <= maxPage) nextPage = maxPage + 1
     }
 
     fun toJson(): JSONObject {
@@ -246,14 +346,20 @@ class LauncherModel(private val app: LauncherApp) {
     }
 
     private fun writeNow() {
+        if (!ready) return   // never overwrite a good file with a half-loaded (empty) state
         dirty = false
-        val s = toJson().toString()
-        io.execute {
-            try {
-                val tmp = File(file.parentFile, "state.tmp")
-                tmp.writeText(s)
-                tmp.renameTo(file)
-            } catch (e: Exception) { }
+        val s = try { toJson().toString() } catch (t: Throwable) { Diag.e("model.toJson", t); return }
+        io.safe("model.write") {
+            val dir = file.parentFile ?: return@safe
+            dir.mkdirs()
+            val tmp = File(dir, "state.tmp")
+            tmp.writeText(s)
+            if (tmp.length() == 0L) { tmp.delete(); throw IOException("empty state write") }
+            if (file.exists() && file.length() > 0L) file.copyTo(backupFile, overwrite = true)
+            if (!tmp.renameTo(file)) {
+                file.delete()
+                if (!tmp.renameTo(file)) throw IOException("could not replace state.json")
+            }
         }
     }
 
@@ -265,17 +371,29 @@ class LauncherModel(private val app: LauncherApp) {
     }
 
     fun importAll(text: String): Boolean {
+        val oldState = try { toJson().toString() } catch (t: Throwable) { null }
+        val oldPrefs = try { app.prefs.exportJson() } catch (t: Throwable) { null }
         return try {
             val o = JSONObject(text)
             if (o.optString("app") != "ajmalpad-os") return false
             val st = o.getJSONObject("state")
-            app.prefs.importJson(o.getJSONObject("prefs"))
+            val pf = o.getJSONObject("prefs")
             parse(st)
+            app.prefs.importJson(pf)
             reconcile()
             save()
             app.prefs.touch()
             true
-        } catch (e: Exception) { false }
+        } catch (t: Throwable) {
+            Diag.e("model.import", t)
+            // Put everything back exactly as it was.
+            try {
+                if (oldState != null) parse(JSONObject(oldState))
+                if (oldPrefs != null) app.prefs.importJson(oldPrefs)
+                reconcile()
+            } catch (t2: Throwable) { Diag.e("model.importRollback", t2) }
+            false
+        }
     }
 
     fun resetLayout() {
@@ -293,10 +411,17 @@ class LauncherModel(private val app: LauncherApp) {
         val rows = app.prefs.rows()
         var changed = false
         if (pageOrder.isEmpty()) { pageOrder.add(0); if (nextPage < 1) nextPage = 1; changed = true }
-        val iter = items.iterator()
-        while (iter.hasNext()) {
-            val m = iter.next()
-            if (m.type == Item.APP && !byKey.containsKey(m.key)) { iter.remove(); changed = true }
+        if (queryOk) {
+            // Only prune when the app list is trustworthy, and never lose an item of an app that is still
+            // installed (an update can briefly hide its launcher activity).
+            val iter = items.iterator()
+            while (iter.hasNext()) {
+                val m = iter.next()
+                if (m.type != Item.APP || byKey.containsKey(m.key)) continue
+                val alt = apps.firstOrNull { it.pkg == m.pkg }
+                if (alt != null) { m.cls = alt.cls; changed = true }
+                else if (!isInstalled(m.pkg)) { iter.remove(); changed = true }
+            }
         }
         val first = known.isEmpty() && items.isEmpty()
         if (first) fillDock(app.prefs.int(K.DOCK_COUNT))
@@ -313,7 +438,7 @@ class LauncherModel(private val app: LauncherApp) {
             placeAnywhere(m, cols, rows, -1)
             items.add(m)
         }
-        tidy()
+        guardRun("model.tidy") { tidy() }
         if (changed) save()
     }
 
@@ -327,7 +452,7 @@ class LauncherModel(private val app: LauncherApp) {
         var x = 0
         for (intent in intents) {
             if (x >= n) break
-            val ri = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) ?: continue
+            val ri = try { pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) } catch (t: Throwable) { null } ?: continue
             val pkg = ri.activityInfo?.packageName ?: continue
             val a = apps.firstOrNull { it.pkg == pkg } ?: continue
             if (items.any { it.type == Item.APP && it.key == a.key }) continue
@@ -435,9 +560,9 @@ class LauncherModel(private val app: LauncherApp) {
             }
         }
         val dock = dockItems()
-        for ((i, m) in dock.withIndex()) m.x = i
+        for ((i, m) in dock.withIndex()) { m.x = i; m.y = 0; m.sx = 1; m.sy = 1 }
         for (f in items) if (f.type == Item.FOLDER) {
-            for ((i, c) in children(f.id).withIndex()) c.x = i
+            for ((i, c) in children(f.id).withIndex()) { c.x = i; c.y = 0 }
         }
     }
 

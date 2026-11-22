@@ -49,3 +49,16 @@ The workflow also prints package / SDK levels / HOME-filter check from the built
 - Productivity-mode taskbar / 3-button bar: hidden by default (swipe from the bottom edge to show it). Switch it off in Settings to keep the bar and have the dock sit above it.
 - App Library: button at the right end of the dock (genie animation), also opens when you swipe past the last page.
 - Recognised system apps use iOS names and iOS-style icons (switch off under Icons).
+
+## Hidden apps, diagnostics, preview
+
+- Long-press an app -> *Move to Hidden (password)*. The **Hidden** card in the App Library opens only with the password (stored as a salted PBKDF2 hash; wrong guesses lock entry for a while). Hidden apps never appear in search or the A-Z list. Forgot it: Settings -> Hidden apps -> use your screen lock to reset.
+- Settings has a pinned **live preview** (mini home screen with a real glass dock): glass, icon, label, dock, dimming and genie-speed settings update it while you move the slider. Tap it to play the genie.
+- Errors are logged (Settings -> Diagnostics -> View error log, shareable). Repeated crashes switch on Safe mode automatically. The layout file is written atomically with a backup, and damaged files are repaired or restored.
+
+## Creator
+
+Ajmal Ali A - https://github.com/Ajmaleee - https://www.instagram.com/ajmaleee__/
+Source: https://github.com/Ajmaleee/Ajmal-PadOS
+
+You can always contact me to add new features, fix bugs, or submit a PR.

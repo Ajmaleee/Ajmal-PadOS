@@ -1,21 +1,18 @@
 # AjmalPad OS checklist (Android 10 / API 29, Lenovo Tab M10 TB-X505X)
 
-Previous requests
-- [x] Dock: icons centred in the panel (panel height now follows icon size)
-- [x] Glass visible everywhere: Balanced profile by default, highlights/rim always on, see-through backdrop, frosted fallback when wallpaper access is missing
-- [x] Smooth icon edges on the low-res screen: icons rendered at 2x and averaged down, drawn on whole pixels with filtering
-- [x] iOS app names (Phone, Messages, Safari, App Store, Voice Memos, ...) for recognised apps
-- [x] App Library button at the right end of the dock, opens/closes with a genie animation
-- [x] Swiping past the last home page opens the App Library
-- [x] Interface size slider: 100% = recommended; higher is larger, lower is smaller (no more "zoomed out")
+Round 6 (this one)
+- [x] Dock icons could not be moved and sat above the dock: an earlier build saved y = -1 for dock items, drawing them one row above the dock, outside its touch area. Fixed at load, on save and when dropping; the cell layout also clamps positions
+- [x] App Library closes when you swipe right
+- [x] Settings: genie animation speed (tap the preview to try it)
+- [x] Hidden in the App Library, opens with a password only (salted hash, lock-out after wrong guesses, reset with screen lock)
+- [x] Search: tapping an empty area goes back
+- [x] Settings: pinned live preview (glass slab, icons, labels, dock, dimming)
+- [x] Settings: creator details, links, source, contact note
+- [x] Error handling: crash recorder + log viewer, safe mode after crash loops, protected background tasks, atomic layout saves with backup and repair, app list failures never wipe the layout, widget placeholders instead of deletion, guarded launches/imports/permissions, animation loop protected
 
-This round
-- [x] Specs reviewed: Android 10 (targetSdk 29, minSdk 29), SDM429, 2.8 GiB, 1280x800 at 160 dpi
-- [x] Productivity taskbar / 3-button bar hidden by default (sticky immersive); real bar height reserved when it stays visible or hiding is off
-- [x] One shared layout and grid for portrait and landscape: app order never changes on rotation
-- [x] Page edges bounce (rubber band + spring from the real position) instead of jittering
+Earlier rounds: see git history / previous checklist (dock, glass, iOS icons and names, genie, shared portrait/landscape layout, taskbar hiding, edge bounce, interface size).
 
 Still to verify on the tablet (cannot be tested without the device)
-- [ ] Taskbar hides on the Lenovo build (some OEM bars ignore the flag; the launcher then reserves its height)
-- [ ] Wallpaper blur alignment on this device
-- [ ] Genie animation smoothness on the Snapdragon 429
+- [ ] Build passes (no compiler was available while writing this)
+- [ ] Taskbar hiding on the Lenovo build
+- [ ] Wallpaper blur alignment and genie smoothness on the Snapdragon 429
