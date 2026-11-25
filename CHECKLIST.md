@@ -1,6 +1,12 @@
 # AjmalPad OS checklist (Android 10 / API 29, Lenovo Tab M10 TB-X505X)
 
-Round 7 (this one)
+Round 8 (this one)
+- [x] Glass.kt: added the missing `import android.view.View` (CI run #5 confirms the fix builds); scanned all 28 files for other missing imports
+- [x] App Library genie: no bounce (the dock button's press spring was overshooting; now a short non-springy press), starts right after layout, closing reuses the opening picture so it starts instantly, strong ease-out both ways
+- [x] Genie shape: grows from the centre of the library button with a narrow neck (a fifth of the button width) instead of a square-looking base
+- [x] The App Library is rendered once off-screen after start, so its first opening has no wait
+
+Round 7
 - [x] iOS-style widgets: Clock, Batteries (this tablet + Bluetooth devices with ring and device glyphs), Weather (Open-Meteo), Tablet info, Calendar; small / medium / large
 - [x] Widget gallery (swipe through the sizes, tap to add) and live data that only runs while a widget is visible
 - [x] Today View: swipe right on the first page, widget strip over a blurred home screen, swipe left / tap outside to close, configurable cards

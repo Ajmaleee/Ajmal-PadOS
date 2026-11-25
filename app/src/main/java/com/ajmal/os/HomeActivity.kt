@@ -136,6 +136,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         model.whenReady {
             applyAll()
             showNotices()
+            schedulePrewarm()
         }
         askWallpaperAccess()
     }
@@ -226,6 +227,14 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
     override fun attachBaseContext(base: Context) {
         scaleApplied = UiScale.percent()
         super.attachBaseContext(UiScale.wrap(base))
+    }
+
+    /** Renders the App Library once, off-screen, a little after start so its first opening is instant. */
+    private fun schedulePrewarm() {
+        if (Safe.mode || prefs.bool(K.REDUCE_MOTION)) return
+        window.decorView.postDelayed({
+            if (!isFinishing && library == null) guardRun("prewarm") { LibraryOverlay.prewarm(this) }
+        }, 2500)
     }
 
     /** Tells the user once about a repaired layout or an automatic safe mode. */

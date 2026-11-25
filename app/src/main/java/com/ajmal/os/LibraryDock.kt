@@ -1,5 +1,6 @@
 package com.ajmal.os
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -10,6 +11,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import kotlin.math.max
 import kotlin.math.min
 
@@ -28,12 +30,27 @@ class LibraryDockIcon(ctx: Context, private val h: HomeActivity) : View(ctx) {
     private val path = Path()
     private var clusters: List<List<AppInfo>> = emptyList()
     private var press = 1f
-    private val spring = Spring { v -> press = v; invalidate() }
+    private var pressAnim: ValueAnimator? = null
+
+    /** Press feedback without any spring, so nothing overshoots before the genie starts. */
+    private fun pressTo(target: Float, ms: Long) {
+        pressAnim?.cancel()
+        val a = ValueAnimator.ofFloat(press, target)
+        a.duration = ms
+        a.interpolator = DecelerateInterpolator()
+        a.addUpdateListener { press = it.animatedValue as Float; invalidate() }
+        pressAnim = a
+        a.start()
+    }
 
     init {
         isClickable = true
-        spring.snap(1f)
-        setOnClickListener { h.openLibrary(this) }
+        setOnClickListener {
+            pressAnim?.cancel()
+            press = 1f
+            invalidate()
+            h.openLibrary(this)
+        }
     }
 
     fun refresh() {
@@ -105,8 +122,8 @@ class LibraryDockIcon(ctx: Context, private val h: HomeActivity) : View(ctx) {
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> spring.to(0.92f, 700f)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> spring.to(1f, 700f)
+            MotionEvent.ACTION_DOWN -> pressTo(0.94f, 70)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pressTo(1f, 90)
         }
         return super.onTouchEvent(e)
     }

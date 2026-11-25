@@ -23,6 +23,7 @@ import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.AbsListView
@@ -36,6 +37,7 @@ import android.widget.SectionIndexer
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.max
 import kotlin.math.min
 
 /** Slide/fade an overlay in and out with one spring. */
@@ -640,6 +642,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
 
         scroll.isVerticalScrollBarEnabled = false
         scroll.overScrollMode = View.OVER_SCROLL_NEVER
+        scroll.setOnScrollChangeListener { _, _, y, _, oldY -> if (y != oldY) dirty = true }
         gridHost.orientation = LinearLayout.VERTICAL
         scroll.addView(gridHost, FrameLayout.LayoutParams(-1, -2))
         content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).also { it.topMargin = h.dpi(16) })
@@ -714,17 +717,28 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         } catch (t: Throwable) { null }
     }
 
-    /** Opens with a genie animation out of the dock's library icon. */
+    private var cleanSnap: Bitmap? = null
+    private var dirty = false
+    private var openedWarm = true
+
+    /** Opens with a genie animation out of the dock's library icon, as soon as the first layout is done. */
     fun show() {
         h.overlayLayer.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.visibility = View.INVISIBLE
-        // First open: give the icon cache a moment so the snapshot isn't full of placeholders.
-        view.postDelayed({ genieOpen() }, if (warmed) 0L else 150L)
-        warmed = true
+        openedWarm = warmed
+        view.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (view.width <= 0) return
+                view.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                // Not pre-warmed yet (first seconds after start): give the icon cache a moment.
+                if (warmed) genieOpen() else view.postDelayed({ genieOpen() }, 110)
+                warmed = true
+            }
+        })
     }
 
     private fun genieOpen() {
-        if (closing) return
+        if (closing || view.parent == null) return
         val bmp = if (h.prefs.bool(K.REDUCE_MOTION) || Safe.mode) null else snapshot()
         if (bmp == null) {
             view.alpha = 0f
@@ -735,12 +749,13 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         val gv = GenieView(h, bmp, srcRect())
         genie = gv
         snap = bmp
+        cleanSnap = bmp        // kept while the library is untouched, so closing needs no new snapshot
+        if (!openedWarm) dirty = true   // icons may still have been loading in the picture
         h.overlayLayer.addView(gv, FrameLayout.LayoutParams(-1, -1))
         gv.animateTo(1f, dur(440)) {
             view.visibility = View.VISIBLE
             h.overlayLayer.removeView(gv)
             genie = null
-            snap?.recycle()
             snap = null
         }
     }
@@ -750,6 +765,8 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         genie = null
         snap?.recycle()
         snap = null
+        cleanSnap?.recycle()
+        cleanSnap = null
         h.overlayLayer.removeView(view)
         h.libraryGone()
     }
@@ -758,6 +775,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         if (closing) return
         closing = true
         hideIme(h, edit)
+        val hadSheet = sheet != null
         sheet?.let { view.removeView(it) }
         sheet = null
         val running = genie
@@ -765,7 +783,15 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
             running.animateTo(0f, dur(300)) { finishClose() }
             return
         }
-        val bmp = if (h.prefs.bool(K.REDUCE_MOTION) || Safe.mode) null else snapshot()
+        val reduce = h.prefs.bool(K.REDUCE_MOTION) || Safe.mode
+        val pulled = pull.translationX != 0f || pull.translationY != 0f || pull.alpha < 0.999f
+        val reuse = cleanSnap
+        val bmp: Bitmap? = when {
+            reduce -> null
+            // Untouched since opening: reuse the picture from the opening, so the animation starts instantly.
+            reuse != null && !reuse.isRecycled && !dirty && !pulled && !searching && !hadSheet -> reuse
+            else -> { reuse?.recycle(); cleanSnap = null; snapshot() }
+        }
         if (bmp == null) {
             view.animate().alpha(0f).setDuration(140).withEndAction { finishClose() }.start()
             return
@@ -779,7 +805,28 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         gv.animateTo(0f, dur(340)) { finishClose() }
     }
 
-    companion object { private var warmed = false }
+    companion object {
+        private var warmed = false
+
+        /** Builds the library once off-screen, so its icons are cached and the first open has no wait. */
+        fun prewarm(h: HomeActivity) {
+            if (warmed || Safe.mode) return
+            guardRun("library.prewarm") {
+                val w = h.screenW
+                val hh = h.screenH
+                if (w <= 0 || hh <= 0) return@guardRun
+                val lo = LibraryOverlay(h, null)
+                lo.view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(hh, View.MeasureSpec.EXACTLY))
+                lo.view.layout(0, 0, w, hh)
+                val b = Bitmap.createBitmap(max(1, w / 8), max(1, hh / 8), Bitmap.Config.ARGB_8888)
+                val c = Canvas(b)
+                c.scale(1f / 8f, 1f / 8f)
+                lo.view.draw(c)
+                b.recycle()
+                h.window.decorView.postDelayed({ warmed = true }, 800)   // icons are rendered by then
+            }
+        }
+    }
 
     /** Back button: close the category sheet, then the search list, then the library. */
     fun back() {
@@ -795,12 +842,14 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
     }
 
     fun reload() {
+        dirty = true
         buildGrid()
         if (searching) rebuildList()
     }
 
     private fun enterSearch() {
         if (searching) return
+        dirty = true
         searching = true
         scroll.visibility = View.GONE
         list.visibility = View.VISIBLE
@@ -809,6 +858,7 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
     }
 
     private fun exitSearch() {
+        dirty = true
         searching = false
         edit.setText("")
         hideIme(h, edit)

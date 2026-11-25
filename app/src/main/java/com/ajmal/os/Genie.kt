@@ -9,8 +9,8 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
-import android.view.animation.AccelerateInterpolator
-import android.view.animation.DecelerateInterpolator
+import android.view.animation.PathInterpolator
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -21,7 +21,7 @@ class GenieView(ctx: Context, private val bmp: Bitmap, private val src: RectF) :
     var t = 0f
         set(v) { field = v; invalidate() }
     private val cols = 10
-    private val rows = 24
+    private val rows = 28
     private val verts = FloatArray((cols + 1) * (rows + 1) * 2)
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private var anim: ValueAnimator? = null
@@ -40,24 +40,24 @@ class GenieView(ctx: Context, private val bmp: Bitmap, private val src: RectF) :
         val w = bmp.width.toFloat()
         val h = bmp.height.toFloat()
         val sx = src.centerX()
-        val sy = src.centerY()
-        val iw = src.width()
-        val k = min(1f, t * 1.1f)
-        val topY = sy - sy * (1f - (1f - k) * (1f - k) * (1f - k))
-        val botY = src.bottom + (h - src.bottom) * smooth((t - 0.3f) / 0.7f)
+        val base = src.centerY()                 // everything starts at the middle of the library button
+        val tw = max(6f, src.width() * 0.2f)     // the neck at the button is only a fraction of its width
+        val top = base * (1f - smooth(t / 0.75f))
+        val bot = base + (h - base) * smooth((t - 0.25f) / 0.75f)
+        val delay = 0.6f
         var n = 0
         for (i in 0..rows) {
             val v = i / rows.toFloat()
-            val s = smooth((t - 0.55f * v) / 0.45f)
-            val width = iw + (w - iw) * s
+            val s = smooth((t - delay * v) / (1f - delay))   // rows near the button open last
+            val width = tw + (w - tw) * s
             val cx = sx + (w / 2f - sx) * s
-            val y = topY + (botY - topY) * v
+            val y = top + (bot - top) * v
             for (j in 0..cols) {
                 verts[n++] = cx + (j / cols.toFloat() - 0.5f) * width
                 verts[n++] = y
             }
         }
-        paint.alpha = (255f * min(1f, t * 4f)).toInt()
+        paint.alpha = (255f * smooth(t / 0.1f)).toInt()   // only the very first / last instant fades
         c.drawBitmapMesh(bmp, cols, rows, verts, 0, null, 0, paint)
     }
 
@@ -65,7 +65,8 @@ class GenieView(ctx: Context, private val bmp: Bitmap, private val src: RectF) :
         anim?.let { it.removeAllListeners(); it.cancel() }
         val a = ValueAnimator.ofFloat(t, target)
         a.duration = ms
-        a.interpolator = if (target > t) DecelerateInterpolator(1.3f) else AccelerateInterpolator(1.1f)
+        // One strong ease-out both ways: it starts at full speed (no wind-up, no overshoot) and lands softly.
+        a.interpolator = PathInterpolator(0.15f, 0.85f, 0.2f, 1f)
         a.addUpdateListener { t = it.animatedValue as Float }
         a.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) { end() }
