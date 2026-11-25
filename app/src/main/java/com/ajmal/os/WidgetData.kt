@@ -140,7 +140,7 @@ object WidgetData {
         if (subs.isEmpty()) stop()
     }
 
-    private fun notifyAll() { for (v in ArrayList(subs.keys)) v.invalidate() }
+    private fun invalidateSubscribers() { for (v in ArrayList(subs.keys)) v.invalidate() }
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -163,7 +163,7 @@ object WidgetData {
                     "android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED",
                     "android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" -> main.postDelayed({ refreshBt() }, 600)
                 }
-                notifyAll()
+                invalidateSubscribers()
             }
         }
     }
@@ -302,7 +302,7 @@ object WidgetData {
     fun refreshBt() {
         guardRun("widgetdata.refreshBt") {
             val ad = BluetoothAdapter.getDefaultAdapter()
-            if (ad == null || !ad.isEnabled) { bt = emptyList(); notifyAll(); return@guardRun }
+            if (ad == null || !ad.isEnabled) { bt = emptyList(); invalidateSubscribers(); return@guardRun }
             val seen = LinkedHashMap<String, BtDevice>()
             for (px in ArrayList(proxies.values)) {
                 for (d in px.connectedDevices) {
@@ -310,7 +310,7 @@ object WidgetData {
                 }
             }
             bt = ArrayList(seen.values)
-            notifyAll()
+            invalidateSubscribers()
         }
     }
 
@@ -349,10 +349,10 @@ object WidgetData {
                 guardRun("weather.save") {
                     cacheFile().writeText(JSONObject().put("key", p.key).put("fetched", parsed.fetched).put("data", data).toString())
                 }
-                main.post { weather = parsed; weatherError = null; notifyAll() }
+                main.post { weather = parsed; weatherError = null; invalidateSubscribers() }
             } catch (t: Throwable) {
                 Diag.e("weather.fetch", t)
-                main.post { weatherError = "Weather unavailable"; notifyAll() }
+                main.post { weatherError = "Weather unavailable"; invalidateSubscribers() }
             } finally {
                 fetching = false
             }
