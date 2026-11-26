@@ -30,6 +30,18 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var list: LinearLayout
+    private val tabNames = arrayOf("Look", "Icons", "Home", "Motion", "Privacy", "System")
+    private val tabOf = mapOf(
+        "Appearance" to 0, "Liquid Glass" to 0, "Icons" to 1,
+        "Home screen" to 2, "Widgets & Today View" to 2, "Wallpaper" to 2,
+        "Animations" to 3, "Gestures" to 3, "Performance" to 3,
+        "Hidden apps" to 4, "Diagnostics" to 5, "Backup" to 5, "About" to 5
+    )
+    private lateinit var lists: List<LinearLayout>
+    private lateinit var tabViews: List<TextView>
+    private lateinit var scroller: ScrollView
+    private var curTab = 0
+    private var maxWidth = 0
     private val fg = Color.WHITE
     private val sub = 0xFF8E8E93.toInt()
     private var preview: GlassPreviewCard? = null
@@ -65,14 +77,38 @@ class SettingsActivity : Activity() {
         }
         root.addView(hide, LinearLayout.LayoutParams(-1, -2))
 
+        maxWidth = maxW
+        lists = tabNames.map {
+            LinearLayout(this).also { l ->
+                l.orientation = LinearLayout.VERTICAL
+                l.setPadding(dpi(16), dpi(0), dpi(16), dpi(40))
+            }
+        }
+        list = lists[0]
+
+        // Tab bar
+        val bar = LinearLayout(this)
+        bar.orientation = LinearLayout.HORIZONTAL
+        bar.setPadding(dpi(12), dpi(6), dpi(12), dpi(6))
+        tabViews = tabNames.mapIndexed { i, n ->
+            val t = label(this, n, 14f, sub)
+            t.gravity = android.view.Gravity.CENTER
+            t.setPadding(dpi(16), dpi(8), dpi(16), dpi(8))
+            t.setOnClickListener { selectTab(i) }
+            bar.addView(t, LinearLayout.LayoutParams(-2, -2).also { it.rightMargin = dpi(6) })
+            t
+        }
+        val hs = android.widget.HorizontalScrollView(this)
+        hs.isHorizontalScrollBarEnabled = false
+        hs.addView(bar)
+        root.addView(hs, LinearLayout.LayoutParams(-1, -2))
+
         val sv = ScrollView(this)
-        list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
-        list.setPadding(dpi(16), dpi(0), dpi(16), dpi(40))
-        sv.addView(list, FrameLayout.LayoutParams(maxW, -2, android.view.Gravity.CENTER_HORIZONTAL))
+        scroller = sv
         root.addView(sv, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         build()
+        selectTab(0)
     }
 
     override fun onDestroy() {
@@ -81,7 +117,20 @@ class SettingsActivity : Activity() {
         super.onDestroy()
     }
 
+    private fun selectTab(i: Int) {
+        curTab = i
+        scroller.removeAllViews()
+        scroller.addView(lists[i], FrameLayout.LayoutParams(maxWidth, -2, android.view.Gravity.CENTER_HORIZONTAL))
+        scroller.scrollTo(0, 0)
+        for ((k, t) in tabViews.withIndex()) {
+            val on = k == i
+            t.setTextColor(if (on) 0xFF0E0F13.toInt() else sub)
+            t.background = roundBg(if (on) Color.WHITE else 0xFF1A1C22.toInt(), dpf(18f))
+        }
+    }
+
     private fun header(t: String) {
+        tabOf[t]?.let { list = lists[it] }
         val v = label(this, t.uppercase(), 12f, sub)
         v.setPadding(dpi(4), dpi(24), 0, dpi(8))
         list.addView(v)
@@ -184,9 +233,9 @@ class SettingsActivity : Activity() {
         seek("Liquid lens magnification", K.LQ_MAG, 0, 200, "%")
         seek("Liquid tint / fill", K.LQ_ALPHA, 0, 200, "%")
         seek("Squish and stretch strength", K.LQ_SQUISH, 0, 200, "%")
-        choice("Icon appearance", K.ICON_APPEARANCE, arrayOf("Default", "Light", "Dark", "Clear (glass)", "Tinted", "Liquid Glass"))
 
         header("Icons")
+        choice("Icon appearance", K.ICON_APPEARANCE, arrayOf("Default", "Light", "Dark", "Clear (glass)", "Tinted", "Liquid Glass"))
         seek("Icon size", K.ICON_SIZE, 40, 80, " dp")
         seek("Corner radius", K.ICON_RADIUS, 10, 50, "%")
         toggle("iOS-style system app icons", K.IOS_ICONS, "Phone, Messages, Camera, Settings, Clock, Calendar and more are redrawn in an iOS look, in every appearance")
