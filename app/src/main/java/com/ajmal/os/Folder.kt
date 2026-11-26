@@ -34,6 +34,7 @@ class FolderOverlay(private val h: HomeActivity, val folder: Item, private val s
         scrim.setOnClickListener { dismiss(true) }
         view.addView(scrim, FrameLayout.LayoutParams(-1, -1))
         panel.radiusDp = 32f
+        panel.liquid = true
         panel.clipChildren = false
         val col = LinearLayout(h)
         col.orientation = LinearLayout.VERTICAL

@@ -1,6 +1,15 @@
 # AjmalPad OS checklist (Android 10 / API 29, Lenovo Tab M10 TB-X505X)
 
-Round 8 (this one)
+Round 10 (this one)
+- [x] Widgets are sized by the cells they really need (spans from the real cell shape: small 2 wide, medium ~4, large fills the height) and fill them; old widgets are re-fitted once when the room is free
+- [x] Dragging a widget over apps/folders/widgets slides them aside live; they settle in the nearest free cells on drop (refused if there is no room)
+- [x] Move to Hidden on the home-screen menu; Hidden card always shown; widget cards sized in measure/layout; Today View empty-state text
+
+Round 9
+- [x] Liquid.kt: Liquid Glass material (mesh refraction, RGB dispersion, photo-driven lighting) and water-balloon squish physics; wired into GlassFrame for the *Ultra Glass* profile
+- [ ] Compile + test on the tablet (not compiled here: no Android SDK in the sandbox). Check FPS while dragging a widget.
+
+Round 8
 - [x] Glass.kt: added the missing `import android.view.View` (CI run #5 confirms the fix builds); scanned all 28 files for other missing imports
 - [x] App Library genie: no bounce (the dock button's press spring was overshooting; now a short non-springy press), starts right after layout, closing reuses the opening picture so it starts instantly, strong ease-out both ways
 - [x] Genie shape: grows from the centre of the library button with a narrow neck (a fifth of the button width) instead of a square-looking base

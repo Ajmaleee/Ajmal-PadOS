@@ -502,6 +502,35 @@ class LauncherModel(private val app: LauncherApp) {
         return true
     }
 
+    /**
+     * Where the items in the way of a widget dropped at (x, y, sx x sy) can go: each moves to the nearest free
+     * spot of its own size on the same page. Null when something has nowhere to go (then the drop is refused).
+     */
+    fun planPush(page: Int, cols: Int, rows: Int, mover: Item, x: Int, y: Int, sx: Int, sy: Int): List<Pair<Item, IntArray>>? {
+        val hit = items.filter {
+            it.container == Item.HOME && it.page == page && it !== mover &&
+                it.x < x + sx && it.x + it.sx > x && it.y < y + sy && it.y + it.sy > y
+        }
+        if (hit.isEmpty()) return emptyList()
+        val g = occupancy(page, cols, rows, mover)
+        for (o in hit) for (yy in max(0, o.y) until min(rows, o.y + o.sy)) for (xx in max(0, o.x) until min(cols, o.x + o.sx)) g[yy][xx] = false
+        for (yy in y until min(rows, y + sy)) for (xx in x until min(cols, x + sx)) g[yy][xx] = true
+        val out = ArrayList<Pair<Item, IntArray>>()
+        for (o in hit.sortedByDescending { it.sx * it.sy }) {
+            var best: IntArray? = null
+            var bd = Int.MAX_VALUE
+            for (yy in 0..(rows - o.sy)) for (xx in 0..(cols - o.sx)) {
+                if (!fits(g, xx, yy, o.sx, o.sy)) continue
+                val d = abs(xx - o.x) + abs(yy - o.y)
+                if (d < bd) { bd = d; best = intArrayOf(xx, yy) }
+            }
+            val b = best ?: return null
+            for (yy in b[1] until b[1] + o.sy) for (xx in b[0] until b[0] + o.sx) g[yy][xx] = true
+            out.add(o to b)
+        }
+        return out
+    }
+
     fun findFree(page: Int, sx: Int, sy: Int, cols: Int, rows: Int, ignore: Item?): IntArray? {
         val g = occupancy(page, cols, rows, ignore)
         for (y in 0 until rows) for (x in 0 until cols) if (fits(g, x, y, sx, sy)) return intArrayOf(x, y)

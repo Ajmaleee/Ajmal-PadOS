@@ -198,6 +198,7 @@ class GlassPreviewCard(ctx: Context) : FrameLayout(ctx) {
         slab.renderer = renderer
         slab.origin = sceneView
         slab.radiusDp = 28f
+        slab.squish = true
         slab.addView(dockRow, LayoutParams(-1, -1))
         val lp = LayoutParams(0, (74 * dp).toInt(), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
         lp.bottomMargin = (10 * dp).toInt()

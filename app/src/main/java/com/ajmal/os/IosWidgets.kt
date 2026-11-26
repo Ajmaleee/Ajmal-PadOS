@@ -57,12 +57,66 @@ object IosWidgets {
     fun refW(s: Size) = if (s == Size.S) 158f else 338f
     fun refH(s: Size) = if (s == Size.L) 354f else 158f
 
-    fun spans(s: Size): Pair<Int, Int> = when (s) { Size.S -> 2 to 2; Size.M -> 4 to 2; Size.L -> 4 to 4 }
+    /** Legacy rule (widgets saved before the family was stored on the item). */
+    private fun legacySizeOf(sx: Int, sy: Int): Size = if (sx >= 4 && sy >= 3) Size.L else if (sx >= 3) Size.M else Size.S
 
-    fun sizeOf(sx: Int, sy: Int): Size = if (sx >= 4 && sy >= 3) Size.L else if (sx >= 3) Size.M else Size.S
+    /** Widget family of an item: stored in [Item.title] ("S"/"M"/"L"); older widgets fall back to their span. */
+    fun familyOf(item: Item): Size = when (item.title) {
+        "S" -> Size.S
+        "M" -> Size.M
+        "L" -> Size.L
+        else -> legacySizeOf(item.sx, item.sy)
+    }
+
+    /** Size in px of one home-grid cell right now (falls back to the screen shape before the first layout). */
+    fun cellDims(act: HomeActivity): Pair<Float, Float> {
+        val pg = act.pager.currentPage()
+        if (pg != null && pg.width > 0 && pg.height > 0) return pg.cellW() to pg.cellH()
+        val dm = act.resources.displayMetrics
+        return dm.widthPixels / act.cols.toFloat() to dm.heightPixels * 0.8f / act.rows
+    }
+
+    /**
+     * Cells a widget really needs: a small widget is 2 cells wide, the others about 4, and the height follows from
+     * the iOS proportions and the actual cell shape, so the widget fills its cells instead of leaving unusable gaps.
+     */
+    fun spansFor(s: Size, cellW: Float, cellH: Float, cols: Int, rows: Int): Pair<Int, Int> {
+        val ratio = refW(s) / refH(s)
+        var sx = (refW(s) * (2f * cellW / 158f) / cellW).roundToInt().coerceIn(1, cols)
+        var sy = (sx * cellW / (ratio * cellH)).roundToInt().coerceAtLeast(1)
+        if (sy > rows) {
+            sy = rows
+            sx = (sy * cellH * ratio / cellW).roundToInt().coerceIn(1, cols)
+        }
+        return sx to sy
+    }
+
+    /**
+     * Older widgets were stored with generous spans while the card was letterboxed inside them, which blocked
+     * cells nobody could use. Re-fit them once to the cells they really need (only when the room is free).
+     */
+    fun migrate(act: HomeActivity, item: Item) {
+        if (item.title == "S" || item.title == "M" || item.title == "L") return
+        val fam = legacySizeOf(item.sx, item.sy)
+        item.title = fam.name
+        val (cw, ch) = cellDims(act)
+        val (nx, ny) = spansFor(fam, cw, ch, act.cols, act.rows)
+        if (nx != item.sx || ny != item.sy) {
+            val g = act.model.occupancy(item.page, act.cols, act.rows, item)
+            if (act.model.fits(g, item.x, item.y, nx, ny)) { item.sx = nx; item.sy = ny }
+        }
+        act.model.save()
+    }
+
+    /** After a manual resize: pick the family that matches the new shape. */
+    fun refit(act: HomeActivity, item: Item) {
+        val (cw, ch) = cellDims(act)
+        val r = (item.sx * cw) / (item.sy * ch)
+        item.title = if (r >= 1.6f) "M" else if (item.sx * item.sy >= 10) "L" else "S"
+    }
 
     fun create(act: HomeActivity, item: Item): View {
-        val f = IosWidgetFrame(act, item.cls, sizeOf(item.sx, item.sy))
+        val f = IosWidgetFrame(act, item.cls, familyOf(item))
         val wf = WidgetFrame(act, act)
         wf.addView(f, FrameLayout.LayoutParams(-1, -1))
         wf.tag = item
@@ -70,7 +124,7 @@ object IosWidgets {
     }
 
     fun resize(v: View, item: Item) {
-        ((v as? FrameLayout)?.getChildAt(0) as? IosWidgetFrame)?.size = sizeOf(item.sx, item.sy)
+        ((v as? FrameLayout)?.getChildAt(0) as? IosWidgetFrame)?.size = familyOf(item)
     }
 }
 
@@ -78,35 +132,44 @@ object IosWidgets {
 class IosWidgetFrame(ctx: Context, val kind: String, size: IosWidgets.Size) : FrameLayout(ctx) {
     private val glassMode = LauncherApp.get().prefs.bool(K.WIDGET_GLASS)
     private val content = IosWidgetContent(ctx, kind, size, glassMode)
-    private val card: FrameLayout = if (glassMode) GlassFrame(ctx).also { it.radiusDp = 22f } else FrameLayout(ctx)
+    private val card: FrameLayout = if (glassMode) GlassFrame(ctx).also { it.radiusDp = 22f; it.squish = true } else FrameLayout(ctx)
     private val dp = ctx.resources.displayMetrics.density
     var size: IosWidgets.Size = size
-        set(v) { field = v; content.size = v; fit(width, height) }
+        set(v) { field = v; content.size = v; requestLayout() }
 
     init {
         card.addView(content, LayoutParams(-1, -1))
-        addView(card, LayoutParams(0, 0, Gravity.CENTER))
+        addView(card, LayoutParams(-1, -1, Gravity.CENTER))
     }
 
-    private fun fit(w: Int, h: Int) {
-        if (w <= 0 || h <= 0) return
-        val m = 3f * dp
-        val aw = w - 2 * m
-        val ah = h - 2 * m
-        val ratio = IosWidgets.refW(size) / IosWidgets.refH(size)
-        val cw: Float
-        val ch: Float
-        if (aw / ah > ratio) { ch = ah; cw = ch * ratio } else { cw = aw; ch = cw / ratio }
-        val lp = card.layoutParams as LayoutParams
-        if (lp.width != cw.toInt() || lp.height != ch.toInt()) {
-            lp.width = cw.toInt(); lp.height = ch.toInt()
-            card.layoutParams = lp
+    /**
+     * The card keeps the iOS proportions inside whatever rectangle it is given. It is sized right here in
+     * onMeasure/onLayout: changing LayoutParams from onSizeChanged asks for a layout in the middle of a layout
+     * pass, which Android can drop (inside a ScrollView or a cell grid), leaving the widget at 0x0 = invisible.
+     */
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val w = MeasureSpec.getSize(widthSpec)
+        val h = MeasureSpec.getSize(heightSpec)
+        setMeasuredDimension(w, h)
+        var cw = 0
+        var ch = 0
+        if (w > 0 && h > 0) {
+            val m = 3f * dp
+            val aw = w - 2 * m
+            val ah = h - 2 * m
+            cw = aw.toInt(); ch = ah.toInt()     // fill the cells it owns
         }
+        card.measure(MeasureSpec.makeMeasureSpec(max(0, cw), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(max(0, ch), MeasureSpec.EXACTLY))
     }
 
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        super.onSizeChanged(w, h, ow, oh)
-        fit(w, h)
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val w = r - l
+        val h = b - t
+        val cw = card.measuredWidth
+        val ch = card.measuredHeight
+        val x = (w - cw) / 2
+        val y = (h - ch) / 2
+        card.layout(x, y, x + cw, y + ch)
     }
 }
 

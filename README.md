@@ -23,6 +23,7 @@ The workflow also prints package / SDK levels / HOME-filter check from the built
 | `Model.kt` | app snapshot (LauncherApps, refreshed only on package callbacks), layout JSON, folders/pages logic |
 | `Icons.kt` | off-thread icon renderer + LRU cache; light/dark/clear/tinted; custom icons & zip packs |
 | `Glass.kt` | wallpaper → 1/8-res blurred cache → `GlassFrame` panels; 3 profiles; no GL thread |
+| `Liquid.kt` | Liquid Glass: `LiquidCfg` constants, `LiquidBody` squish/stretch springs, `LiquidPainter` mesh-warp refraction + RGB dispersion |
 | `Spring.kt` | one shared Choreographer callback, only alive while a spring runs |
 | `Pager.kt` / `Views.kt` | pager + gesture engine, canvas-drawn icon view, grid, dock, widget frame |
 | `Drag.kt` | drag & drop, folder creation by hover, edge page switching |
@@ -72,3 +73,12 @@ You can always contact me to add new features, fix bugs, or submit a PR.
   - *Tablet*: battery, storage, memory, Android version, uptime.
 - **Today View**: swipe right on the first home page. A strip of widgets slides in over a blurred home screen (swipe left or tap outside to leave; Edit opens the settings). Choose its cards in Settings.
 - Nothing runs in the background unless a widget is on screen.
+
+## Liquid Glass (Settings -> Glass profile -> *Ultra Glass (Liquid)*)
+- Edge lens: a 28x14 mesh (denser at the edges) samples the blurred wallpaper through `(1 - depth/band)^2.3` along the outward normal, band = 0.41 x height, 62u refraction (u = height/100), 7% centre magnification that grows with deformation, 5% ripple.
+- Dispersion: three passes at 1.09 / 1.00 / 0.91, one colour channel each, recombined with additive blending. *Reduced refraction* turns this into a single pass.
+- Lighting: warm colour = 45% wallpaper average + 55% warm off-white; angle `--ang` (135 deg) shifts with deformation. Rim ring, bevel, crescents, gloss, warm focus, meniscus, specular, glint, sheen, deep + contact shadow, caustic.
+- Squish: press = compress + jiggle, drag = asymptotic stretch with volume conservation, asymmetric corner radii, 3D tilt, slosh that swells with velocity. Springs k = 162, c = 10.5; the frame loop stops when settled. Enabled on the search pill, glass widgets and the settings preview (`GlassFrame.squish = true` for any other surface).
+- Constants live in `LiquidCfg`. If `drawVertices` fails on a device the panel logs it and falls back to the classic glass.
+- Differences from the web spec: no SVG filters on Android 10, so the displacement is analytic per mesh vertex instead of a baked map; `feTurbulence` is a two-sine slosh; the backdrop is the 1/8-scale blurred wallpaper (clamped edges replace the bleed margin).
+- Always-liquid surfaces (any profile except Ultra Lite): the dock (press-squish only, so icon drags don't stretch it), the search pill, App Library category cards (a liquid slab sits behind each card), the library category sheet and folder panels. Needs wallpaper access for the refraction; without it the classic frosted glass is used.

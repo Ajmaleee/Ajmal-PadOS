@@ -362,6 +362,8 @@ class CategoryCardView(
     private val onOpen: () -> Unit, private val onLaunched: () -> Unit,
     private val locked: Boolean = false
 ) : View(ctx) {
+    /** True when a liquid glass slab is drawn behind this card, so the card skips its own flat background. */
+    var glassBacked = false
     private val app = LauncherApp.get()
     private val dp = ctx.resources.displayMetrics.density
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop
@@ -444,16 +446,18 @@ class CategoryCardView(
     override fun onDraw(c: Canvas) {
         val dark = app.isDark()
         val fg = if (dark) Color.WHITE else 0xFF1C1C1E.toInt()
-        rf.set(0f, 0f, cardPx.toFloat(), cardPx.toFloat())
-        val r = cardPx * 0.2f
-        bg.style = Paint.Style.FILL
-        bg.color = if (dark) Color.argb(58, 255, 255, 255) else Color.argb(118, 255, 255, 255)
-        c.drawPath(Squircle.path(rf, r, path), bg)
-        bg.style = Paint.Style.STROKE
-        bg.strokeWidth = dp
-        bg.color = Color.argb(if (dark) 40 else 90, 255, 255, 255)
-        rf.set(dp / 2f, dp / 2f, cardPx - dp / 2f, cardPx - dp / 2f)
-        c.drawPath(Squircle.path(rf, r, path), bg)
+        if (!glassBacked) {
+            rf.set(0f, 0f, cardPx.toFloat(), cardPx.toFloat())
+            val r = cardPx * 0.2f
+            bg.style = Paint.Style.FILL
+            bg.color = if (dark) Color.argb(58, 255, 255, 255) else Color.argb(118, 255, 255, 255)
+            c.drawPath(Squircle.path(rf, r, path), bg)
+            bg.style = Paint.Style.STROKE
+            bg.strokeWidth = dp
+            bg.color = Color.argb(if (dark) 40 else 90, 255, 255, 255)
+            rf.set(dp / 2f, dp / 2f, cardPx - dp / 2f, cardPx - dp / 2f)
+            c.drawPath(Squircle.path(rf, r, path), bg)
+        }
 
         val big = if (bigOnly) 4 else 3
         if (locked) drawLock(c, fg)
@@ -892,7 +896,8 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
             if (l.isNotEmpty()) groups.add(Group(cat, l, l.sortedBy { it.lower }))
         }
         val hid = m.apps.filter { hidden.contains(it.key) }
-        if (hid.isNotEmpty()) groups.add(Group("Hidden", emptyList(), hid.sortedBy { it.lower }, true))
+        // Always present (shows a padlock, never its contents), so its existence does not reveal whether anything is hidden.
+        groups.add(Group("Hidden", emptyList(), hid.sortedBy { it.lower }, true))
 
         val gap = h.dpi(14)
         val avail = min(h.screenW, h.dpi(980)) - h.dpi(32)
@@ -901,12 +906,24 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         for (pair in groups.chunked(n)) {
             val row = LinearLayout(h)
             row.orientation = LinearLayout.HORIZONTAL
+            row.clipChildren = false
             for ((i, g) in pair.withIndex()) {
                 val onOpen: () -> Unit = if (g.locked) ({ VaultUi.unlock(h) { openSheet(g.title, g.all) } }) else ({ openSheet(g.title, g.all) })
                 val card = CategoryCardView(h, h, g.title, g.display, cw, onOpen, { close() }, g.locked)
+                card.glassBacked = true
+                // Liquid Glass slab behind the card (the card view only draws icons + title on top of it).
+                val slab = GlassFrame(h)
+                slab.liquid = true
+                slab.squish = true
+                slab.pullable = false
+                slab.radiusDp = cw * 0.2f / h.resources.displayMetrics.density
+                slab.shadowScale = 0.6f
+                slab.glassH = cw
+                slab.clipChildren = false
+                slab.addView(card, FrameLayout.LayoutParams(-1, -2))
                 val lp = LinearLayout.LayoutParams(cw, -2)
                 if (i < n - 1) lp.rightMargin = gap
-                row.addView(card, lp)
+                row.addView(slab, lp)
             }
             gridHost.addView(row, LinearLayout.LayoutParams(-1, -2).also { it.bottomMargin = h.dpi(6) })
         }
@@ -924,6 +941,9 @@ class LibraryOverlay(private val h: HomeActivity, private val srcView: View? = n
         val panel = GlassFrame(h)
         panel.radiusDp = 30f
         panel.strength = 1.3f
+        panel.liquid = true
+        panel.squish = true
+        panel.pullable = false
         val col = LinearLayout(h)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(h.dpi(16), h.dpi(18), h.dpi(16), h.dpi(12))

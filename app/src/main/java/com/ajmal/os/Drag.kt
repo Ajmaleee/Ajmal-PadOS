@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -21,6 +22,7 @@ class DragController(private val h: HomeActivity) {
         var x = 0
         var y = 0
         var other: Item? = null
+        var moves: List<Pair<Item, IntArray>>? = null
     }
 
     var active = false
@@ -141,10 +143,12 @@ class DragController(private val h: HomeActivity) {
         val rows = page.rows
         t.page = pid
         if (m.type == Item.WIDGET) {
-            val cx = min(cell[0], cols - m.sx)
-            val cy = min(cell[1], rows - m.sy)
-            val g = h.model.occupancy(pid, cols, rows, m)
-            if (h.model.fits(g, cx, cy, m.sx, m.sy)) { t.kind = CELL; t.x = cx; t.y = cy }
+            // anchor on the widget's own top-left corner (not on the finger), snapped to the nearest cell
+            val tl = page.cellAt(rx - grabX - loc[0] + page.cellW() / 2f, ry - grabY - loc[1] + page.cellH() / 2f)
+            val cx = tl[0].coerceIn(0, max(0, cols - m.sx))
+            val cy = tl[1].coerceIn(0, max(0, rows - m.sy))
+            val plan = h.model.planPush(pid, cols, rows, m, cx, cy, m.sx, m.sy)
+            if (plan != null) { t.kind = CELL; t.x = cx; t.y = cy; t.moves = plan }
             dwellOn(null)
             return t
         }
@@ -165,6 +169,7 @@ class DragController(private val h: HomeActivity) {
         when (t.kind) {
             CELL -> {
                 if (m.type == Item.WIDGET) {
+                    t.moves?.forEach { (o, dest) -> o.x = dest[0]; o.y = dest[1] }   // items in the way slide aside
                     m.container = Item.HOME; m.page = t.page; m.x = t.x; m.y = t.y
                     return true
                 }

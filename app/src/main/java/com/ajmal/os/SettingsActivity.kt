@@ -171,7 +171,7 @@ class SettingsActivity : Activity() {
         header("Appearance")
         seek("Interface size (100% = recommended)", K.UI_SCALE, 70, 200, "%")
         choice("Theme", K.THEME, arrayOf("Automatic (system)", "Light", "Dark"))
-        choice("Glass profile", K.PROFILE, arrayOf("Ultra Lite", "Balanced (default)", "Ultra Glass"))
+        choice("Glass profile", K.PROFILE, arrayOf("Ultra Lite", "Balanced (default)", "Ultra Glass (Liquid)"))
         seek("Transparency", K.OPACITY, 0, 100, "%")
         seek("Blur intensity", K.BLUR, 0, 100, "%")
         seek("Refraction intensity", K.REFRACT, 0, 100, "%")

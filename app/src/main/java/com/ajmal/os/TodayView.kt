@@ -58,6 +58,10 @@ class TodayView(private val h: HomeActivity) {
         if (p.bool(K.TD_BATT)) card("battery")
         if (p.bool(K.TD_TABLET)) card("tablet")
         if (p.bool(K.TD_CAL)) card("calendar")
+        if (col.childCount <= 2) {
+            val none = label(h, "No widgets selected.\nTap Edit to choose what Today View shows.", 15f, 0xCCFFFFFF.toInt())
+            col.addView(none, LinearLayout.LayoutParams(-2, -2).also { it.topMargin = h.dpi(24) })
+        }
 
         val edit = label(h, "Edit", 15f, Color.WHITE)
         edit.gravity = Gravity.CENTER

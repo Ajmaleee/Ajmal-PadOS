@@ -73,8 +73,10 @@ class WidgetManager(private val act: HomeActivity) {
 
     fun addIos(kind: String, size: IosWidgets.Size) {
         guardRun("widget.addIos") {
-            val sp = IosWidgets.spans(size)
+            val (cw, ch) = IosWidgets.cellDims(act)
+            val sp = IosWidgets.spansFor(size, cw, ch, act.cols, act.rows)
             val m = act.model.newItem(Item.WIDGET)
+            m.title = size.name
             m.widgetId = IosWidgets.ID
             m.pkg = IosWidgets.PKG
             m.cls = kind

@@ -6,6 +6,7 @@ import android.graphics.*
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -215,6 +216,14 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     /** Settings preview: an own backdrop source, positioned relative to [origin] instead of the screen. */
     var renderer: GlassRenderer? = null
     var origin: View? = null
+    /** Water-balloon squish / stretch on touch (observes touches, never consumes them). */
+    var squish = false
+    /** Squish only on press (no drag-stretch): for surfaces whose children drag, like the dock. */
+    var pullable = true
+    /** Always use the Liquid Glass material here (unless the profile is Ultra Lite), whatever the global profile. */
+    var liquid = false
+    /** If > 0, the glass covers only this many px from the top (the rest of the frame is caption space). */
+    var glassH = 0
 
     private val app = LauncherApp.get()
     private val dp = ctx.resources.displayMetrics.density
@@ -240,6 +249,12 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     private var frost: LinearGradient? = null
     private var frostH = -1f
     private var frostDark = false
+    private var body: LiquidBody? = null
+    private var painter: LiquidPainter? = null
+    private var liquidFailed = false
+    private val deformM = Matrix()
+    private var warmGen = -1
+    private var warmCol = 0xFFFFF4E8.toInt()
 
     init {
         setWillNotDraw(false)
@@ -253,6 +268,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     }
 
     override fun onDetachedFromWindow() {
+        body?.cancel()
         (renderer ?: app.glass).remove(this)
         super.onDetachedFromWindow()
     }
@@ -260,7 +276,82 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     private fun al(x: Float): Int = (x.coerceIn(0f, 1f) * 255f).toInt()
 
     override fun onDraw(c: Canvas) {
-        try { drawGlass(c) } catch (t: Throwable) { Diag.e("glass.draw", t) }
+        try {
+            if (drawLiquid(c)) return
+            val b = body
+            if (b != null && b.running && !fullscreen) {
+                // Classic profiles: deform the whole surface about its centre.
+                b.matrix(width.toFloat(), height.toFloat(), deformM)
+                val n = c.save()
+                c.concat(deformM)
+                try { drawGlass(c) } finally { c.restoreToCount(n) }
+            } else drawGlass(c)
+        } catch (t: Throwable) { Diag.e("glass.draw", t) }
+    }
+
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        if (squish && !fullscreen) {
+            val b = body ?: LiquidBody(this, dp).also { body = it }
+            b.pull = pullable
+            b.onTouch(e)
+        }
+        return super.dispatchTouchEvent(e)
+    }
+
+    /** Content follows the squish at 30% so text never looks stretched. */
+    override fun dispatchDraw(c: Canvas) {
+        val b = body
+        if (b != null && b.running) {
+            val n = c.save()
+            c.translate(b.ox * 0.6f, b.oy * 0.6f)
+            c.scale(1f + (b.scaleX() - 1f) * 0.3f, 1f + (b.scaleY() - 1f) * 0.3f, width / 2f, height / 2f)
+            try { super.dispatchDraw(c) } finally { c.restoreToCount(n) }
+        } else super.dispatchDraw(c)
+    }
+
+    /** Ultra Glass = Liquid Glass (mesh-warped refraction with RGB dispersion). Returns false to use the classic path. */
+    private fun drawLiquid(c: Canvas): Boolean {
+        if (liquidFailed || !drawBg || fullscreen || !refract || Safe.mode) return false
+        val p = app.prefs
+        val prof = p.int(K.PROFILE)
+        if (!((liquid && prof != 0) || prof == 2)) return false
+        val g = renderer ?: app.glass
+        val bm = g.blurred ?: return false
+        val w = width.toFloat()
+        val h = if (glassH > 0) min(glassH.toFloat(), height.toFloat()) else height.toFloat()
+        if (w < 2f || h < 2f) return false
+        getLocationOnScreen(loc)
+        origin?.let { o ->
+            val ol = IntArray(2)
+            o.getLocationOnScreen(ol)
+            loc[0] -= ol[0]; loc[1] -= ol[1]
+        }
+        if (warmGen != g.gen) {
+            // photo-driven lighting: 45% sampled background + 55% warm off-white
+            val a = g.avgColor
+            val ow = LiquidCfg.OFF_WHITE
+            warmCol = Color.rgb(
+                (Color.red(a) * 0.45f + ow[0] * 0.55f).toInt(),
+                (Color.green(a) * 0.45f + ow[1] * 0.55f).toInt(),
+                (Color.blue(a) * 0.45f + ow[2] * 0.55f).toInt()
+            )
+            warmGen = g.gen
+        }
+        val pt = painter ?: LiquidPainter(dp).also { painter = it }
+        val rad = min(radiusDp * dp, min(w, h) / 2f)
+        val ok = try {
+            pt.draw(
+                c, w, h, rad, g, bm, loc, body, app.isDark(),
+                (p.int(K.REFRACT) / 50f).coerceIn(0f, 2f), (p.int(K.EDGE) / 100f).coerceIn(0f, 1f), p.int(K.OPACITY),
+                p.int(K.SHADOW) / 100f * shadowScale, !p.bool(K.REDUCED_REFR), warmCol, app.glassBase(app.isDark())
+            )
+        } catch (t: Throwable) {
+            // drawVertices / layers unsupported on this device: log once and use the classic glass from now on.
+            Diag.e("glass.liquid", t)
+            liquidFailed = true
+            false
+        }
+        return ok
     }
 
     private fun drawGlass(c: Canvas) {

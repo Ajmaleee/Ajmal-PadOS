@@ -323,6 +323,8 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         pill = GlassFrame(this)
         pill.radiusDp = 17f
         pill.shadowScale = 0.5f
+        pill.squish = true
+        pill.liquid = true
         val pt = label(this, "🔍  Search", 14f, Color.WHITE)
         pt.gravity = Gravity.CENTER
         pill.addView(pt, FrameLayout.LayoutParams(-1, -1))
@@ -331,6 +333,9 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
 
         dockFrame = DockFrame(this)
         dockFrame.radiusDp = 30f
+        dockFrame.liquid = true
+        dockFrame.squish = true
+        dockFrame.pullable = false
         dockLayout = CellLayout(this)
         dockFrame.addView(dockLayout, FrameLayout.LayoutParams(-1, -1))
         libDock = LibraryDockIcon(this, this)
@@ -480,6 +485,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         if (m.type == Item.WIDGET) {
             var v = viewCache[m.id]
             if (v == null) {
+                if (m.widgetId == IosWidgets.ID) IosWidgets.migrate(this, m)
                 v = widgets.createView(m) ?: return null
                 viewCache[m.id] = v
             }
@@ -624,6 +630,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
                     if (m.container != Item.IN_FOLDER) rows.add("Add to folder" to { chooseFolder(m) })
                 }
                 rows.add("Share application" to { shareApp(a.pkg) })
+                if (!locked) rows.add("Move to Hidden (password)" to { folderOverlay?.dismiss(false); hideApp(a) })
                 if (!a.system) rows.add("Uninstall" to { uninstall(a.pkg) })
                 if (!locked) {
                     rows.add((if (m.container == Item.IN_FOLDER) "Remove from folder" else "Remove from home screen") to {
@@ -664,6 +671,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             DragController.DOCK -> dockLayout.setHint(t.x, 0, 1, 1)
             DragController.FOLDER_NEW, DragController.FOLDER_ADD -> hot = viewCache[t.other?.id ?: -1L] as? AppIconView
         }
+        previewPush(if (m.type == Item.WIDGET && t.kind == DragController.CELL) t.moves else null)
         if (hot !== hotView) {
             hotView?.setHot(false)
             hot?.setHot(true)
@@ -671,7 +679,32 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         }
     }
 
+    private val pushed = HashSet<Long>()
+
+    /** While a widget is dragged, the items in its way slide to the cells they will move to. */
+    private fun previewPush(moves: List<Pair<Item, IntArray>>?) {
+        val page = pager.currentPage() ?: return
+        val cw = page.cellW()
+        val ch = page.cellH()
+        val ms = if (prefs.bool(K.REDUCE_MOTION)) 1L else 190L
+        val want = HashMap<Long, Pair<Item, IntArray>>()
+        moves?.forEach { want[it.first.id] = it }
+        for (id in ArrayList(pushed)) if (!want.containsKey(id)) {
+            viewCache[id]?.animate()?.translationX(0f)?.translationY(0f)?.setDuration(ms)?.start()
+            pushed.remove(id)
+        }
+        for ((id, mv) in want) {
+            val v = viewCache[id] ?: continue
+            val dest = mv.second
+            v.animate().translationX((dest[0] - mv.first.x) * cw).translationY((dest[1] - mv.first.y) * ch)
+                .setDuration(ms).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+            pushed.add(id)
+        }
+    }
+
     fun clearHints() {
+        for (id in pushed) viewCache[id]?.let { it.animate().cancel(); it.translationX = 0f; it.translationY = 0f }
+        pushed.clear()
         for (p in pageLayouts.values) p.clearHint()
         dockLayout.clearHint()
         hotView?.setHot(false)
@@ -932,7 +965,11 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
             val nx = (m.sx + dx).coerceIn(1, cols)
             val ny = (m.sy + dy).coerceIn(1, rows)
             val g = model.occupancy(m.page, cols, rows, m)
-            if (model.fits(g, m.x, m.y, nx, ny)) { m.sx = nx; m.sy = ny; model.save(); refreshAll() }
+            if (model.fits(g, m.x, m.y, nx, ny)) {
+                m.sx = nx; m.sy = ny
+                if (m.widgetId == IosWidgets.ID) IosWidgets.refit(this, m)
+                model.save(); refreshAll()
+            }
             else Toast.makeText(this, "Not enough room", Toast.LENGTH_SHORT).show()
         }
         listDialog("Resize widget", listOf(
@@ -1004,6 +1041,18 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         try { startActivity(Intent.createChooser(i, "Share application")) } catch (t: Throwable) { }
     }
 
+    /** Moves an app into the password-protected Hidden card: off the home screen, out of search and the A-Z list. */
+    fun hideApp(a: AppInfo) {
+        model.hiddenApps.add(a.key)
+        if (!Vault.isSet(this)) Toast.makeText(this, "Hidden apps open with a password. You will be asked to create one when you open Hidden in the App Library.", Toast.LENGTH_LONG).show()
+        for (m in ArrayList(model.items)) if (m.type == Item.APP && m.key == a.key) model.items.remove(m)
+        model.tidy()
+        model.save()
+        refreshAll()
+        library?.reload()
+        Toast.makeText(this, "Moved to Hidden", Toast.LENGTH_SHORT).show()
+    }
+
     /** Actions for an app chosen from the App Library or Search (not placed on the grid). */
     fun appActions(a: AppInfo) {
         val acts = ArrayList<Pair<String, () -> Unit>>()
@@ -1026,15 +1075,8 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         })
         val hid = model.hiddenApps.contains(a.key)
         acts.add((if (hid) "Remove from Hidden" else "Move to Hidden (password)") to {
-            if (hid) model.hiddenApps.remove(a.key)
-            else {
-                model.hiddenApps.add(a.key)
-                if (!Vault.isSet(this)) Toast.makeText(this, "Hidden apps open with a password. You will be asked to create one when you open Hidden in the App Library.", Toast.LENGTH_LONG).show()
-                for (m in ArrayList(model.items)) if (m.type == Item.APP && m.key == a.key) model.items.remove(m)
-                model.tidy()
-                refreshAll()
-            }
-            model.save(); library?.reload()
+            if (hid) { model.hiddenApps.remove(a.key); model.save(); library?.reload() }
+            else hideApp(a)
         })
         acts.add("Set category" to { categoryDialog(a) })
         acts.add("App info" to { appInfo(a.pkg) })
