@@ -8,6 +8,7 @@ object K {
     // Appearance
     const val THEME = "theme"; const val PROFILE = "profile"; const val OPACITY = "opacity"
     const val BLUR = "blur"; const val REFRACT = "refract"; const val TINT = "tint"
+    const val LQ_DISP = "lq_disp"; const val LQ_MAG = "lq_mag"; const val LQ_SQUISH = "lq_squish"; const val LQ_ALPHA = "lq_alpha"; const val SQUIRCLE = "squircle"
     const val EDGE = "edge"; const val SHADOW = "shadow"; const val ICON_APPEARANCE = "icon_appearance"
     // Icons
     const val ICON_SIZE = "icon_size"; const val ICON_RADIUS = "icon_radius"; const val LABELS = "labels"
@@ -49,7 +50,7 @@ class Prefs(ctx: Context) {
 
     init {
         d(K.THEME, 0); d(K.PROFILE, 1); d(K.OPACITY, 55); d(K.BLUR, 45); d(K.REFRACT, 35)
-        d(K.TINT, 0); d(K.EDGE, 60); d(K.SHADOW, 40); d(K.ICON_APPEARANCE, 0)
+        d(K.LQ_DISP, 100); d(K.LQ_MAG, 100); d(K.LQ_SQUISH, 100); d(K.LQ_ALPHA, 100); d(K.SQUIRCLE, true); d(K.TINT, 0); d(K.EDGE, 60); d(K.SHADOW, 40); d(K.ICON_APPEARANCE, 0)
         d(K.ICON_SIZE, 64); d(K.ICON_RADIUS, 23); d(K.LABELS, true); d(K.LABEL_SIZE, 12)
         d(K.LABEL_COLOR, 0); d(K.LARGE_ICONS, false); d(K.IOS_ICONS, true)
         d(K.COLS, 6); d(K.ROWS, 5); d(K.UI_SCALE, 100); d(K.LIB_SWIPE, true); d(K.HIDE_NAV, true); d(K.TODAY_SWIPE, true); d(K.TD_CLOCK, true); d(K.TD_WEATHER, true); d(K.TD_BATT, true); d(K.TD_TABLET, true); d(K.TD_CAL, false); d(K.WIDGET_GLASS, false); d(K.HSPACE, 6); d(K.VSPACE, 6); d(K.DOTS, true)

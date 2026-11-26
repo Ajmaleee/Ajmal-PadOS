@@ -4,14 +4,18 @@ import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Color
-import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.widget.TextView
 
 fun Context.dpf(v: Float): Float = v * resources.displayMetrics.density
 fun Context.dpi(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
-/** A continuous-corner squircle background, used anywhere the launcher previously used a rounded rectangle. */
-fun roundBg(color: Int, radiusPx: Float): Drawable = SquircleDrawable(color, radiusPx)
+fun roundBg(color: Int, radiusPx: Float): GradientDrawable {
+    val g = GradientDrawable()
+    g.setColor(color)
+    g.cornerRadius = radiusPx
+    return g
+}
 
 fun mix(a: Int, b: Int, t: Float): Int {
     val r = (Color.red(a) * (1f - t) + Color.red(b) * t).toInt()

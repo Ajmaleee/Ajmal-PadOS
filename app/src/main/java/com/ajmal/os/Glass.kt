@@ -253,6 +253,10 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
     private var painter: LiquidPainter? = null
     private var liquidFailed = false
     private val deformM = Matrix()
+    private val sqPath = Path()
+    private fun rrect(c: Canvas, r: RectF, rx: Float, ry: Float, p: Paint) {
+        if (app.prefs.bool(K.SQUIRCLE)) c.drawPath(Squircle.path(r, rx, sqPath), p) else c.drawRoundRect(r, rx, ry, p)
+    }
     private var warmGen = -1
     private var warmCol = 0xFFFFF4E8.toInt()
 
@@ -293,6 +297,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
         if (squish && !fullscreen) {
             val b = body ?: LiquidBody(this, dp).also { body = it }
             b.pull = pullable
+            b.strength = app.prefs.int(K.LQ_SQUISH) / 100f
             b.onTouch(e)
         }
         return super.dispatchTouchEvent(e)
@@ -340,6 +345,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
         val pt = painter ?: LiquidPainter(dp).also { painter = it }
         val rad = min(radiusDp * dp, min(w, h) / 2f)
         val ok = try {
+            pt.dispScale = p.int(K.LQ_DISP) / 100f; pt.magScale = p.int(K.LQ_MAG) / 100f; pt.alphaScale = p.int(K.LQ_ALPHA) / 100f; pt.squircle = p.bool(K.SQUIRCLE)
             pt.draw(
                 c, w, h, rad, g, bm, loc, body, app.isDark(),
                 (p.int(K.REFRACT) / 50f).coerceIn(0f, 2f), (p.int(K.EDGE) / 100f).coerceIn(0f, 1f), p.int(K.OPACITY),
@@ -382,7 +388,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
                 val e = i * 2.2f * dp
                 tmp.set(-e * 0.7f, e * 0.25f, w + e * 0.7f, h + e * 0.9f)
                 paint.color = Color.argb((70f * sh / i).toInt().coerceIn(0, 255), 0, 0, 0)
-                c.drawRoundRect(tmp, rad + e * 0.7f, rad + e * 0.7f, paint)
+                rrect(c, tmp, rad + e * 0.7f, rad + e * 0.7f, paint)
             }
         }
 
@@ -410,7 +416,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
             }
             // A touch of see-through so a slightly misaligned backdrop never reads as a solid slab.
             paint.color = Color.argb(if (fullscreen) 255 else 215, 255, 255, 255)
-            c.drawRoundRect(rect, rad, rad, paint)
+            rrect(c, rect, rad, rad, paint)
             paint.shader = null
         }
 
@@ -426,11 +432,11 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
                 frostH = h; frostDark = dark
             }
             paint.shader = frost
-            c.drawRoundRect(rect, rad, rad, paint)
+            rrect(c, rect, rad, rad, paint)
             paint.shader = null
         } else {
             paint.color = (base and 0xFFFFFF) or (al(a.coerceAtMost(0.92f)) shl 24)
-            c.drawRoundRect(rect, rad, rad, paint)
+            rrect(c, rect, rad, rad, paint)
         }
 
         if (fullscreen) return
@@ -460,10 +466,10 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
         }
         run {
             paint.shader = specShader
-            c.drawRoundRect(rect, rad, rad, paint)
+            rrect(c, rect, rad, rad, paint)
             if (prof == 2) {
                 paint.shader = sheenShader
-                c.drawRoundRect(rect, rad, rad, paint)
+                rrect(c, rect, rad, rad, paint)
             }
             // Fresnel-style rim: three fading inner strokes.
             paint.shader = null
@@ -474,7 +480,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
                 tmp.set(ins, ins, w - ins, h - ins)
                 paint.color = Color.argb(al((0.10f - k * 0.03f) * edge), 255, 255, 255)
                 val rr = max(0f, rad - ins)
-                c.drawRoundRect(tmp, rr, rr, paint)
+                rrect(c, tmp, rr, rr, paint)
             }
         }
         if (edge > 0.02f) {
@@ -483,7 +489,7 @@ open class GlassFrame(ctx: Context) : FrameLayout(ctx) {
             paint.shader = edgeShader
             val ins = 0.65f * dp
             tmp.set(ins, ins, w - ins, h - ins)
-            c.drawRoundRect(tmp, max(0f, rad - ins), max(0f, rad - ins), paint)
+            rrect(c, tmp, max(0f, rad - ins), max(0f, rad - ins), paint)
         }
         paint.shader = null
         paint.style = Paint.Style.FILL

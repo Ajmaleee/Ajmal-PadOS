@@ -178,6 +178,12 @@ class SettingsActivity : Activity() {
         choice("Glass tint", K.TINT, arrayOf("Neutral", "Blue", "Warm", "Green", "Pink", "From wallpaper"))
         seek("Edge highlights", K.EDGE, 0, 100, "%")
         seek("Shadow intensity", K.SHADOW, 0, 100, "%")
+        header("Liquid Glass")
+        toggle("Squircle shapes", K.SQUIRCLE, "Smooth iOS-style corners on the dock, library, menus and panels")
+        seek("Liquid dispersion (colour split)", K.LQ_DISP, 0, 200, "%")
+        seek("Liquid lens magnification", K.LQ_MAG, 0, 200, "%")
+        seek("Liquid tint / fill", K.LQ_ALPHA, 0, 200, "%")
+        seek("Squish and stretch strength", K.LQ_SQUISH, 0, 200, "%")
         choice("Icon appearance", K.ICON_APPEARANCE, arrayOf("Default", "Light", "Dark", "Clear (glass)", "Tinted", "Liquid Glass"))
 
         header("Icons")

@@ -47,6 +47,7 @@ class LiquidBody(private val host: View, private val dp: Float) : Choreographer.
 
     /** false = press-only squish (no stretch from dragging). */
     var pull = true
+    var strength = 1f
     var running = false; private set
     var energy = 0f; private set
     var phase = 0f; private set
@@ -162,8 +163,8 @@ class LiquidBody(private val host: View, private val dp: Float) : Choreographer.
     /** Volume-conserving scale about the centre. */
     fun scaleX(): Float { val a = rawX(); val b = rawY(); return a / sqrt(a * b) }
     fun scaleY(): Float { val a = rawX(); val b = rawY(); return b / sqrt(a * b) }
-    private fun rawX(): Float = max(0.6f, (1f / (1f - 0.12f * q).coerceIn(0.6f, 1.4f)) * (1f + 0.9f * ex) * (1f - 0.45f * ey))
-    private fun rawY(): Float = max(0.6f, (1f - 0.12f * q).coerceIn(0.6f, 1.4f) * (1f + 0.9f * ey) * (1f - 0.45f * ex))
+    private fun rawX(): Float = max(0.6f, (1f / (1f - 0.12f * q * strength).coerceIn(0.6f, 1.4f)) * (1f + 0.9f * ex * strength) * (1f - 0.45f * ey * strength))
+    private fun rawY(): Float = max(0.6f, (1f - 0.12f * q * strength).coerceIn(0.6f, 1.4f) * (1f + 0.9f * ey * strength) * (1f - 0.45f * ex * strength))
 
     /** Maps the undeformed shape to the deformed one. */
     fun matrix(w: Float, h: Float, out: Matrix) {
@@ -197,6 +198,14 @@ class LiquidBody(private val host: View, private val dp: Float) : Choreographer.
  * Canvas.drawVertices + BitmapShader stands in for the SVG feDisplacementMap pipeline (no GL, no RenderEffect on API 29).
  */
 class LiquidPainter(private val dp: Float) {
+    var dispScale = 1f
+    var magScale = 1f
+    var alphaScale = 1f
+    var squircle = true
+    private val sqp = Path()
+    private fun rrect(c: Canvas, r: RectF, rx: Float, ry: Float, p: Paint) {
+        if (squircle) c.drawPath(Squircle.path(r, rx, sqp), p) else c.drawRoundRect(r, rx, ry, p)
+    }
     private val gx = LiquidCfg.GX
     private val gy = LiquidCfg.GY
     private val nv = (gx + 1) * (gy + 1)
@@ -266,6 +275,7 @@ class LiquidPainter(private val dp: Float) {
     private fun shapePath(out: Path, ins: Float, w: Float, h: Float) {
         rr.set(ins, ins, w - ins, h - ins)
         val r = FloatArray(8) { max(0f, radii[it] - ins) }
+        if (squircle) { Squircle.path(rr, (r[0] + r[1]) / 2f, out); return }
         out.reset()
         out.addRoundRect(rr, r, Path.Direction.CW)
     }
@@ -309,12 +319,12 @@ class LiquidPainter(private val dp: Float) {
                 val e = i * 2.4f * dp * (1f - 0.25f * q)
                 rr.set(-e * 0.7f, e * 0.35f, w + e * 0.7f, h + e)
                 paint.color = Color.argb(al(0.27f * shadow / i), 0, 0, 0)
-                c.drawRoundRect(rr, r0 + e * 0.7f, r0 + e * 0.7f, paint)
+                rrect(c, rr, r0 + e * 0.7f, r0 + e * 0.7f, paint)
             }
             val ce = 1.4f * dp
             rr.set(-ce * 0.3f, ce * 0.8f, w + ce * 0.3f, h + ce)
             paint.color = Color.argb(al((0.20f + 0.16f * q.coerceIn(0f, 1f)) * shadow), 0, 0, 0)
-            c.drawRoundRect(rr, r0 + ce, r0 + ce, paint)
+            rrect(c, rr, r0 + ce, r0 + ce, paint)
         }
         gCaus?.let {
             paint.shader = it; paint.xfermode = xScreen
@@ -364,7 +374,7 @@ class LiquidPainter(private val dp: Float) {
         paint.reset(); paint.isAntiAlias = true; paint.style = Paint.Style.FILL
 
         // fill alpha = (1 - transparency) * 3, nudged by the user's Transparency slider
-        val a = (1f - LiquidCfg.TRANSPARENCY) * 3f * (0.5f + (100 - opacityPref) / 50f)
+        val a = (1f - LiquidCfg.TRANSPARENCY) * 3f * (0.5f + (100 - opacityPref) / 50f) * alphaScale
         paint.color = (base and 0xFFFFFF) or (al(a) shl 24)
         c.drawPath(path, paint)
 
@@ -416,13 +426,13 @@ class LiquidPainter(private val dp: Float) {
         val hh = h / 2f
         val band = min(LiquidCfg.EDGE_BAND * h, min(hw, hh))
         val scale = LiquidCfg.REFRACTION * u * refrPref
-        val mag = LiquidCfg.MAG + 0.9f * (abs(sx - 1f) + abs(sy - 1f)) * 0.5f     // bulges when compressed / stretched
+        val mag = 1f + (LiquidCfg.MAG - 1f) * magScale + 0.9f * (abs(sx - 1f) + abs(sy - 1f)) * 0.5f     // bulges when compressed / stretched
         val amp = en * 2.4f * dp                                                  // internal slosh swells with velocity
         val lcx = cx + ox
         val lcy = cy + oy
         val inv = 1f / g.scale
-        val kr = if (disp) 1f + LiquidCfg.DISPERSION else 1f
-        val kb = 1f - LiquidCfg.DISPERSION
+        val kr = if (disp) 1f + LiquidCfg.DISPERSION * dispScale else 1f
+        val kb = 1f - LiquidCfg.DISPERSION * dispScale
         val ripple = LiquidCfg.RIPPLE_AMP
         var o = 0
         for (j in 0..gy) {

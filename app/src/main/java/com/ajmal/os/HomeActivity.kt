@@ -867,6 +867,7 @@ class HomeActivity : Activity(), IconHost, PagerCallbacks {
         scrim.setOnClickListener { dismissMenu() }
         val panel = GlassFrame(this)
         panel.radiusDp = 18f
+        panel.liquid = true
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         val fg = if (app.isDark()) Color.WHITE else 0xFF1C1C1E.toInt()
